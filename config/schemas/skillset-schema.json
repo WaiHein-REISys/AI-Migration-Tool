@@ -1,0 +1,112 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SkillsetConfig",
+  "type": "object",
+  "required": ["title", "version", "source_stack", "target_stack", "component_mappings", "project_structure"],
+  "properties": {
+    "title": { "type": "string" },
+    "version": { "type": "string" },
+    "description": { "type": "string" },
+    "source_stack": {
+      "type": "object",
+      "required": ["frontend", "backend", "database"],
+      "properties": {
+        "frontend": {
+          "type": "object",
+          "required": ["framework", "version", "language"],
+          "properties": {
+            "framework": { "type": "string" },
+            "version": { "type": "string" },
+            "language": { "type": "string" },
+            "styling": { "type": "string" },
+            "module_system": { "type": "string" },
+            "component_pattern": { "type": "string" },
+            "service_pattern": { "type": "string" },
+            "http_client": { "type": "string" },
+            "state_management": { "type": "string" },
+            "routing": { "type": "string" }
+          }
+        },
+        "backend": {
+          "type": "object",
+          "required": ["framework", "version", "language", "api_pattern"],
+          "properties": {
+            "framework": { "type": "string" },
+            "version": { "type": "string" },
+            "language": { "type": "string" },
+            "api_pattern": { "type": "string" },
+            "base_controller": { "type": "string" },
+            "orm": { "type": "string" },
+            "di_pattern": { "type": "string" },
+            "logging": { "type": "string" },
+            "auth": { "type": "string" }
+          }
+        },
+        "database": {
+          "type": "object",
+          "required": ["engine", "access_pattern"],
+          "properties": {
+            "engine": { "type": "string" },
+            "access_pattern": { "type": "string" },
+            "stored_proc_prefix": { "type": "string" },
+            "schema_names": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "target_stack": {
+      "type": "object",
+      "required": ["frontend", "backend", "database"],
+      "properties": {
+        "frontend": {
+          "type": "object",
+          "required": ["framework", "version", "language"]
+        },
+        "backend": {
+          "type": "object",
+          "required": ["framework", "version", "language"]
+        },
+        "database": {
+          "type": "object",
+          "required": ["engine", "access_pattern"]
+        }
+      }
+    },
+    "component_mappings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "source_pattern", "target_pattern", "template"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^MAP-[0-9]{3}$" },
+          "source_pattern": { "type": "string" },
+          "target_pattern": { "type": "string" },
+          "template": { "type": "string" },
+          "notes": { "type": "string" },
+          "example_source": { "type": "string" },
+          "example_target": { "type": "string" }
+        }
+      }
+    },
+    "project_structure": {
+      "type": "object",
+      "required": ["frontend", "backend"],
+      "properties": {
+        "frontend": { "type": "object" },
+        "backend": { "type": "object" }
+      }
+    },
+    "naming_conventions": { "type": "object" },
+    "reference_codebases": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string" },
+        "target": { "type": "string" }
+      }
+    }
+  }
+}

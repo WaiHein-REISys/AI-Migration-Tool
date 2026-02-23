@@ -1,0 +1,65 @@
+{#
+  Template: ng-component-to-react.jinja2
+  Mapping:  MAP-001
+  Source:   Angular 2 @Component with NgModule, RxJS Subject lifecycle
+  Target:   Next.js 15 React functional component (.tsx)
+
+  This template provides a structural scaffold. The LLM fills in the
+  actual business logic by translating the source_code verbatim.
+
+  Key translation rules:
+    OnInit            → useEffect(() => { ... }, [])
+    OnDestroy         → useEffect cleanup: return () => { ... }
+    Subject.takeUntil → useEffect cleanup / AbortController
+    @Inject(Service)  → import { useServiceHook } from "src/services/..."
+    ActivatedRoute    → useSearchParams() / useParams() from next/navigation
+    LayoutService     → BLOCKED (pfm-layout — see RULE-008)
+    EventPublisher    → BLOCKED (pfm-ng — see RULE-008)
+    window.close()    → router.back() or router.push('/')
+    document.getElementById → useRef<HTMLElement>()
+#}
+"use client";
+
+{# ---- Imports block (LLM fills exact imports from source analysis) ---- #}
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+{# TODO: Add feature-specific service imports from src/services/ #}
+{# TODO: Add @trussworks/react-uswds imports if source uses Bootstrap/Material classes #}
+
+{# ---- Type definitions (LLM derives from source class properties) ---- #}
+{# TODO: Move to src/types/{{ step.target_file | replace('.tsx','') }}Types.ts #}
+
+{# ---- Component definition ---- #}
+{# Source selector: {{ step.get('source_metadata', {}).get('selector', 'unknown') }} #}
+const {{ step.target_file | replace('.tsx','') | replace('/', '') | replace('-','') }}Component = () => {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  {# ---- State (translated from class properties) ---- #}
+  {# TODO: LLM maps each class property to useState / useRef as appropriate #}
+
+  {# ---- Lifecycle: OnInit equivalent ---- #}
+  useEffect(() => {
+    {# TODO: LLM translates ngOnInit() body here #}
+
+    {# ---- Cleanup: OnDestroy equivalent ---- #}
+    return () => {
+      {# TODO: LLM translates ngOnDestroy() body here (Subject.complete(), subscriptions) #}
+    };
+  }, []);
+
+  {# ---- AfterViewChecked equivalent ---- #}
+  {# useLayoutEffect for DOM manipulation that was in ngAfterViewChecked #}
+
+  {# ---- Event handlers (translated from component methods) ---- #}
+  {# TODO: LLM translates each public/private method as a useCallback or plain function #}
+
+  return (
+    <>
+      {/* TODO: LLM translates ActionHistory.component.html template here,
+               preserving ALL CSS class names per RULE-002 */}
+    </>
+  );
+};
+
+export default {{ step.target_file | replace('.tsx','') | replace('/', '') | replace('-','') }}Component;

@@ -1,0 +1,172 @@
+{
+  "$schema": "../config/schemas/skillset-schema.json",
+  "title": "SkillsetConfig",
+  "version": "1.0",
+  "description": "Migration config: HAB-GPRSSubmission (Angular 2 + .NET 8 ASP.NET Core) -> simpler-grants-gov (Next.js 15 + Python Flask/SQLAlchemy)",
+
+  "source_stack": {
+    "frontend": {
+      "framework": "Angular",
+      "version": "2.4.3",
+      "language": "TypeScript",
+      "styling": "CSS/LESS/SCSS",
+      "module_system": "SystemJS/NgModules",
+      "component_pattern": "NgModule-based with @Component decorator",
+      "service_pattern": "@Injectable() class extending BaseService",
+      "http_client": "@angular/http Http",
+      "state_management": "RxJS Subject/Observable",
+      "routing": "@angular/router ActivatedRoute"
+    },
+    "backend": {
+      "framework": "ASP.NET Core",
+      "version": "8.0",
+      "language": "C#",
+      "api_pattern": "MVC Area Controllers ([Area('API')])",
+      "base_controller": "SolutionBaseController",
+      "orm": "Entity Framework Core 8 + Dapper",
+      "di_pattern": "ASP.NET Core built-in DI (constructor injection)",
+      "logging": "NLog",
+      "auth": "Identity Server + Windows Auth"
+    },
+    "database": {
+      "engine": "SQL Server",
+      "access_pattern": "Stored Procedures + EF Core repositories",
+      "stored_proc_prefix": "usp",
+      "schema_names": ["sub", "dbo"]
+    }
+  },
+
+  "target_stack": {
+    "frontend": {
+      "framework": "Next.js",
+      "version": "15",
+      "language": "TypeScript",
+      "styling": "SCSS + USWDS",
+      "module_system": "ESModules/App Router",
+      "component_pattern": "Functional React components with hooks",
+      "service_pattern": "Typed async fetcher functions (server-only or client)",
+      "http_client": "Fetch API with custom hooks (useClientFetch)",
+      "state_management": "React hooks (useState, useCallback, useContext)",
+      "routing": "Next.js App Router (next/navigation)"
+    },
+    "backend": {
+      "framework": "Python Flask (APIFlask)",
+      "version": "2.1.0",
+      "language": "Python",
+      "api_pattern": "APIFlask Blueprints with route decorators",
+      "orm": "SQLAlchemy 2.0 with Mapped[] syntax",
+      "di_pattern": "Function parameters + dependency injection via decorators",
+      "logging": "Python logging with structured output",
+      "auth": "JWT + multi-auth strategies",
+      "validation": "Pydantic + Marshmallow schemas"
+    },
+    "database": {
+      "engine": "PostgreSQL",
+      "access_pattern": "SQLAlchemy ORM with Alembic migrations",
+      "migration_tool": "Alembic",
+      "base_model": "ApiSchemaTable + TimestampMixin"
+    }
+  },
+
+  "component_mappings": [
+    {
+      "id": "MAP-001",
+      "source_pattern": "Angular 2 NgModule @Component with RxJS Subject lifecycle",
+      "target_pattern": "Next.js React functional component with hooks",
+      "template": "templates/ng-component-to-react.jinja2",
+      "notes": "Replace OnInit/OnDestroy with useEffect, Subject.takeUntil with AbortController or cleanup function, @Inject() with props/hooks",
+      "example_source": "ActionHistory.component.ts",
+      "example_target": "ApplicationContainer.tsx"
+    },
+    {
+      "id": "MAP-002",
+      "source_pattern": "Angular 2 @Injectable() service extending BaseService (Http)",
+      "target_pattern": "Next.js typed async fetcher function (server-only or client hook)",
+      "template": "templates/ng-service-to-fetcher.jinja2",
+      "notes": "Replace @angular/http Http.post() with fetch() API, Observable<T> with Promise<T> or useClientFetch hook, @Inject() constructor params with module-level imports",
+      "example_source": "Context.service.ts",
+      "example_target": "addOrganizationToApplication.ts"
+    },
+    {
+      "id": "MAP-003",
+      "source_pattern": "ASP.NET Core MVC Area Controller ([Area('API')], SolutionBaseController)",
+      "target_pattern": "Python APIFlask Blueprint route with Pydantic schema",
+      "template": "templates/mvc-controller-to-flask-route.jinja2",
+      "notes": "Translate [HttpPost]/[HttpGet] to @blueprint.post()/@blueprint.get(), [FromBody] models to input schemas, base.UserId to session/auth context, try/catch to Flask error handling",
+      "example_source": "ContextController.cs",
+      "example_target": "agency_routes.py"
+    },
+    {
+      "id": "MAP-004",
+      "source_pattern": "EF Core / Dapper Repository class (IXxxRepository pattern)",
+      "target_pattern": "SQLAlchemy 2.0 service function with db.Session",
+      "template": "templates/repository-to-sqlalchemy-service.jinja2",
+      "notes": "Translate LINQ queries to SQLAlchemy select() statements, async Task<T> to Python async def, DbContext to db.Session, interface-based repos to plain service functions",
+      "example_source": "FundingRepository.cs",
+      "example_target": "create_application.py"
+    },
+    {
+      "id": "MAP-005",
+      "source_pattern": "C# Model / Entity class (Contracts layer)",
+      "target_pattern": "SQLAlchemy 2.0 Model (Mapped[] syntax) + Pydantic schema",
+      "template": "templates/csharp-model-to-sqlalchemy.jinja2",
+      "notes": "Map C# properties to Mapped[type] columns, nullable types to Mapped[type | None], FK references to relationship(), add TimestampMixin and ApiSchemaTable base",
+      "example_source": "*.cs model files",
+      "example_target": "agency_models.py"
+    },
+    {
+      "id": "MAP-006",
+      "source_pattern": "Angular 2 NgModule (*.module.ts with declarations/imports/providers)",
+      "target_pattern": "Next.js feature folder index + types barrel",
+      "template": "templates/ng-module-to-nextjs-feature.jinja2",
+      "notes": "NgModule declarations become component files in a feature folder, providers become service modules, imports become type imports",
+      "example_source": "ActionHistory.module.ts",
+      "example_target": "src/components/application/ folder"
+    }
+  ],
+
+  "project_structure": {
+    "frontend": {
+      "components_root": "frontend/src/components/{feature_name}/",
+      "services_root": "frontend/src/services/{feature_name}/",
+      "api_routes_root": "frontend/src/app/api/{feature_name}/",
+      "types_root": "frontend/src/types/",
+      "hooks_root": "frontend/src/hooks/",
+      "test_suffix": ".test.tsx"
+    },
+    "backend": {
+      "api_root": "api/src/api/{feature_name}/",
+      "services_root": "api/src/services/{feature_name}/",
+      "models_root": "api/src/db/models/",
+      "schemas_root": "api/src/api/{feature_name}/",
+      "migrations_root": "api/src/db/migrations/versions/",
+      "test_root": "api/tests/{feature_name}/"
+    }
+  },
+
+  "naming_conventions": {
+    "frontend": {
+      "components": "PascalCase.tsx",
+      "hooks": "useCamelCase.ts",
+      "types": "PascalCase in types/ folder",
+      "services": "camelCaseFunctionName.ts",
+      "api_route": "route.ts + handler.ts",
+      "test_files": "*.test.ts or *.test.tsx"
+    },
+    "backend": {
+      "modules": "snake_case.py",
+      "classes": "PascalCase",
+      "functions": "snake_case",
+      "db_tables": "snake_case",
+      "schemas": "*_schema.py or *_schemas.py",
+      "routes": "*_routes.py",
+      "models": "*_models.py",
+      "services": "verb_noun.py (e.g. create_application.py)"
+    }
+  },
+
+  "reference_codebases": {
+    "source": "Y:/Solution/HRSA/HAB-GPRSSubmission",
+    "target": "Y:/Solution/HRSA/simpler-grants-gov"
+  }
+}

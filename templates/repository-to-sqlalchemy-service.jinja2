@@ -1,0 +1,116 @@
+{#
+  Template: repository-to-sqlalchemy-service.jinja2
+  Mapping:  MAP-004
+  Source:   EF Core / Dapper Repository class (IXxxRepository pattern) or
+            C# service class (IXxxService pattern)
+  Target:   SQLAlchemy 2.0 service functions with db.Session
+
+  Key translation rules:
+    async Task<T> MethodAsync(...)  → async def method(db_session: Session, ...) -> T:
+    Task<List<T>> MethodAsync(...)  → async def method(...) -> list[T]:
+    DbContext.Set<Entity>()         → db_session.execute(select(Entity))
+    context.Entity.Where(x => ...)  → select(Entity).where(Entity.field == value)
+    .FirstOrDefaultAsync()          → .scalar_one_or_none()
+    .ToListAsync()                  → db_session.execute(...).scalars().all()
+    .AnyAsync(x => ...)             → db_session.execute(select(exists(...)))
+    .AddAsync(entity)               → db_session.add(entity)
+    .SaveChangesAsync()             → db_session (auto-committed by Flask-SQLAlchemy)
+    new Guid()                      → uuid.uuid4()
+    Guid.Parse(str)                 → uuid.UUID(str)
+    DateTime.UtcNow                 → datetime_util.utcnow()
+    throw new Exception(msg)        → raise_flask_error(status, msg)
+    LINQ .Select(x => x.Prop)      → [x.prop for x in results]
+    LINQ .OrderBy(x => x.Prop)     → .order_by(Entity.prop)
+    LINQ .Include(x => x.Nav)      → .options(selectinload(Entity.nav_property))
+    Dapper query (raw SQL)          → db_session.execute(text("..."), params)
+    ILoggingService _logger         → logger = logging.getLogger(__name__)
+    ITimeProvider Time              → from src.util import datetime_util
+    constructor params              → function parameters (no class/DI needed)
+#}
+import logging
+import uuid
+from datetime import datetime
+from uuid import UUID
+
+from sqlalchemy import select, exists
+from sqlalchemy.orm import selectinload
+
+import src.adapters.db as db
+from src.api.route_utils import raise_flask_error
+from src.util import datetime_util
+
+{# TODO: LLM adds model imports from src.db.models.* #}
+{# from src.db.models.{{ feature_name }}_models import {{ EntityName }} #}
+
+{# TODO: LLM adds audit imports if RULE-010 applies #}
+{# from src.services.applications.application_audit import add_audit_event #}
+{# from src.constants.lookup_constants import {{ FeatureName }}AuditEvent  #}
+
+logger = logging.getLogger(__name__)
+
+{#
+  Each public method in the source repository becomes a separate Python function.
+  Functions take db_session as first argument (matches simpler-grants-gov pattern).
+  There is NO class wrapper — these are plain module-level functions.
+
+  Example for GetFundingSourcesAsync(Guid reportId):
+    → def get_funding_sources(db_session: db.Session, report_id: UUID) -> list[FundingSource]:
+#}
+
+def {# TODO: snake_case method name #}(
+    db_session: db.Session,
+    {# TODO: LLM maps C# method parameters to Python equivalents #}
+    {# Guid reportId → report_id: UUID                           #}
+    {# string name   → name: str                                 #}
+    {# bool isActive → is_active: bool                           #}
+) -> {# TODO: return type (SQLAlchemy model or list or None) #}:
+    """
+    Translated from: {{ step.source_file }}
+    Original method: {# TODO: C# method name #}
+    Rules applied: RULE-003 (verbatim business logic), RULE-009 (SQLAlchemy 2.0 Mapped syntax)
+    """
+    logger.info(
+        "{# TODO: descriptive log message #}",
+        extra={
+            {# TODO: relevant ID fields for log context #}
+        },
+    )
+
+    {# ---- Query (verbatim translation from LINQ / Dapper) ---- #}
+    {#
+      LINQ Where clause:
+        .Where(x => x.ReportId == reportId && x.IsActive)
+      Becomes:
+        .where(Entity.report_id == report_id, Entity.is_active.is_(True))
+
+      LINQ Include (eager load):
+        .Include(x => x.RelatedEntities)
+      Becomes:
+        .options(selectinload(Entity.related_entities))
+
+      LINQ FirstOrDefault:
+        → .scalar_one_or_none()
+
+      LINQ ToList:
+        → db_session.execute(...).scalars().all()
+    #}
+    result = db_session.execute(
+        select({# TODO: Entity class name #})
+        .where(
+            {# TODO: translated WHERE conditions #}
+        )
+        .options(
+            {# TODO: selectinload() for any .Include() in source #}
+        )
+        .order_by(
+            {# TODO: translated OrderBy clause #}
+        )
+    ).{# scalar_one_or_none() | scalars().all() #}
+
+    {# ---- Post-query business logic (translated verbatim) ---- #}
+    {# TODO: LLM translates any processing after the query     #}
+
+    {# ---- Audit event (RULE-010 — required for data mutations) ---- #}
+    {# TODO: add_audit_event(...) if this is a create/update/delete operation #}
+
+    return result

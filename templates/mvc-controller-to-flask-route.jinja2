@@ -1,0 +1,103 @@
+{#
+  Template: mvc-controller-to-flask-route.jinja2
+  Mapping:  MAP-003
+  Source:   ASP.NET Core Area API Controller (inherits SolutionBaseController)
+  Target:   Python APIFlask Blueprint + route functions
+
+  Key translation rules:
+    [Area("API")]                    → APIBlueprint(url_prefix="/v1")
+    [Route("api/{ctrl}/{action}")]   → @blueprint.post/get("/v1/{ctrl}/{action}")
+    [HttpPost] / [HttpGet]           → @blueprint.post / @blueprint.get
+    [FromBody] Model                 → @blueprint.input(RequestSchema, arg_name="raw_data")
+    IActionResult / Object           → response.ApiResponse(message="Success", data=...)
+    public ReturnType Method(...)    → def method_name(raw_data: dict) -> response.ApiResponse:
+    base.UserId                      → current_user.user_id (from auth context)
+    base.UserFirstName/LastName      → current_user.first_name / current_user.last_name
+    try { ... } catch (Exception ex) → try: ... except Exception as exc: raise_flask_error(500, str(exc))
+    return Ok(model)                 → return response.ApiResponse(message="Success", data=model)
+    return null                      → raise_flask_error(400, "Invalid request")
+    ModelState.IsValid               → handled by @blueprint.input schema validation
+    new Guid()                       → uuid.uuid4()
+    contextService.GetX(args)        → context_service.get_x(db_session, args)
+    IContextService contextService   → db_session: db.Session parameter
+    ExternalUserRoles.GRANTEE        → map to Python constant in constants/lookup_constants.py
+#}
+import logging
+import uuid
+
+import src.adapters.db as db
+import src.api.response as response
+from src.api.route_utils import raise_flask_error
+from src.auth.multi_auth import api_key_multi_auth, api_key_multi_auth_security_schemes
+from src.adapters.db.flask_db import with_db_session
+from src.logging.flask_logger import add_extra_data_to_current_request_logs
+
+{# TODO: LLM adds feature-specific service imports #}
+{# from src.services.{{ feature_name }}. import ... #}
+
+{# TODO: LLM adds schema import #}
+{# from src.api.{{ feature_name }}.{{ feature_name }}_schema import ( #}
+{#     {{ FeatureName }}RequestSchema, {{ FeatureName }}ResponseSchema #}
+{# ) #}
+
+logger = logging.getLogger(__name__)
+
+{# ---- Blueprint registration (in separate _blueprint.py file) ---- #}
+{# from apiflask import APIBlueprint                                 #}
+{# {{ feature_name }}_blueprint = APIBlueprint(                      #}
+{#     "{{ feature_name }}_v1", __name__,                            #}
+{#     tag="{{ FeatureName }} v1",                                    #}
+{#     url_prefix="/v1",                                              #}
+{# )                                                                  #}
+
+{# ---- Route functions (one per [HttpPost]/[HttpGet] action) ---- #}
+{#
+  Source controller actions map to:
+    1. A blueprint route decorator
+    2. An input schema decorator (if [FromBody] param exists)
+    3. An output schema decorator
+    4. Auth decorator (from base class [Authorize] / [AllowAnonymous])
+    5. @with_db_session decorator
+    6. The function body with translated business logic
+#}
+
+@{{ feature_name }}_blueprint.post("/{# TODO: route path from [Route] attribute #}")
+@{{ feature_name }}_blueprint.input(
+    {# TODO: RequestSchema #},
+    arg_name="raw_data",
+)
+@{{ feature_name }}_blueprint.output({# TODO: ResponseSchema #})
+@{{ feature_name }}_blueprint.doc(security=api_key_multi_auth_security_schemes)
+@api_key_multi_auth.login_required
+@with_db_session()
+def {# TODO: snake_case method name #}(
+    db_session: db.Session,
+    raw_data: dict,
+) -> response.ApiResponse:
+    """
+    {# TODO: docstring from C# XML doc comment or method name #}
+    Source: {{ step.source_file }} → {{ step.target_file }}
+    Rules: RULE-001 (preserve REST contract), RULE-003 (verbatim business logic)
+    """
+    add_extra_data_to_current_request_logs({
+        {# TODO: log relevant request fields #}
+    })
+    logger.info("{# TODO: 'POST /v1/...' #}")
+
+    try:
+        {# TODO: LLM translates C# action body here                        #}
+        {# NOTE: base.UserId       → current_user from auth context        #}
+        {# NOTE: service.GetX(args)→ service_function(db_session, ...)     #}
+        {# NOTE: ModelState check  → handled by schema validation above     #}
+        {# NOTE: new Guid()        → uuid.uuid4()                           #}
+        {# NOTE: ExternalUserRoles.GRANTEE → equivalent Python constant     #}
+        pass
+
+    except Exception as exc:
+        logger.exception("Error in {# TODO: method name #}: %s", exc)
+        raise_flask_error(500, f"Internal error: {exc}")
+
+    return response.ApiResponse(
+        message="Success",
+        data={# TODO: result variable #},
+    )

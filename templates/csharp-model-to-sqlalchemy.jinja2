@@ -1,0 +1,92 @@
+{#
+  Template: csharp-model-to-sqlalchemy.jinja2
+  Mapping:  MAP-005
+  Source:   C# Model / Entity class (GPRS.Core.Contracts)
+  Target:   SQLAlchemy 2.0 Model (Mapped[] syntax) in api/src/db/models/
+
+  Key translation rules:
+    public class FooEntity            → class Foo(ApiSchemaTable, TimestampMixin):
+    [Key] public Guid Id              → foo_id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    public string Name { get; set; } → name: Mapped[str]
+    public string? Name              → name: Mapped[str | None]
+    public bool IsActive             → is_active: Mapped[bool]
+    public int Count                 → count: Mapped[int]
+    public DateTime CreatedAt        → handled by TimestampMixin (do NOT redeclare)
+    public DateTime? UpdatedAt       → handled by TimestampMixin
+    [ForeignKey] public Guid OtherId → other_id: Mapped[uuid.UUID | None] = mapped_column(UUID, ForeignKey(Other.other_id))
+    public virtual Other Other       → other: Mapped["Other | None"] = relationship(Other)
+    public ICollection<Child> Items  → items: Mapped[list["Child"]] = relationship(back_populates="parent", cascade="all, delete-orphan")
+    public enum Status               → class Status(StrEnum) in constants/lookup_constants.py
+    [NotMapped] properties           → Python @property (not a mapped_column)
+    C# naming: PascalCase            → Python naming: snake_case
+    GPRS prefix                      → strip prefix (GPRSFunding → Funding)
+#}
+import uuid
+from uuid import UUID
+from sqlalchemy import ForeignKey
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.db.models.base import ApiSchemaTable, TimestampMixin
+
+{# TODO: LLM adds imports for related models if ForeignKey references exist #}
+{# from src.db.models.{{ related_model }}_models import {{ RelatedModel }} #}
+
+
+class {# TODO: PascalCase entity name (strip GPRS prefix) #}(ApiSchemaTable, TimestampMixin):
+    """
+    Translated from: {{ step.source_file }}
+    Source class: {# TODO: original C# class name #}
+    Rules applied: RULE-003 (verbatim translation), RULE-009 (Mapped[] syntax)
+    """
+    __tablename__ = "{# TODO: snake_case table name (e.g. 'funding_source') #}"
+
+    {# ---- Primary Key ---- #}
+    {# TODO: LLM maps [Key] Guid property to: #}
+    {entity_id}: Mapped[uuid.UUID] = mapped_column(
+        PGUUID, primary_key=True, default=uuid.uuid4
+    )
+
+    {# ---- Regular columns (translated from public properties) ---- #}
+    {#
+      Required string:  public string Name       → name: Mapped[str]
+      Optional string:  public string? Name      → name: Mapped[str | None]
+      Required int:     public int Count         → count: Mapped[int]
+      Boolean:          public bool IsActive     → is_active: Mapped[bool] = mapped_column(default=False)
+      Decimal/money:    public decimal Amount    → amount: Mapped[Decimal] (import from decimal)
+      DO NOT re-declare created_at / updated_at — they come from TimestampMixin
+    #}
+    {# TODO: LLM generates all Mapped[] columns here #}
+
+    {# ---- Foreign Keys ---- #}
+    {#
+      [ForeignKey("OtherEntity")] public Guid OtherId
+      →
+      other_id: Mapped[uuid.UUID | None] = mapped_column(
+          PGUUID, ForeignKey(OtherEntity.other_entity_id)
+      )
+      other: Mapped["OtherEntity | None"] = relationship(OtherEntity)
+    #}
+    {# TODO: LLM generates FK columns and relationships here #}
+
+    {# ---- Collection Relationships ---- #}
+    {#
+      public ICollection<ChildEntity> Items { get; set; }
+      →
+      items: Mapped[list["ChildEntity"]] = relationship(
+          back_populates="parent_entity",
+          uselist=True,
+          cascade="all, delete-orphan",
+      )
+    #}
+    {# TODO: LLM generates collection relationships here #}
+
+    {# ---- Non-mapped computed properties ---- #}
+    {#
+      [NotMapped] public string DisplayName => $"{First} {Last}";
+      →
+      @property
+      def display_name(self) -> str:
+          return f"{self.first} {self.last}"
+    #}
+    {# TODO: LLM generates @property methods for [NotMapped] properties #}

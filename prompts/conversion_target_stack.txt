@@ -1,0 +1,22 @@
+FRONTEND (Next.js 15 / React 19 / TypeScript):
+  - Functional components with "use client" or "use server" directive at top
+  - useState, useEffect, useCallback, useContext for state/lifecycle
+  - Typed props interfaces, no 'any' unless source uses 'any'
+  - Import from 'next/navigation' (useRouter, useSearchParams)
+  - HTTP: fetch() API or useClientFetch custom hook
+  - Subscriptions: useEffect with cleanup return function (replaces ngOnDestroy)
+  - Error: typed error classes from src/errors
+  - Logging: console.error() with structured context
+  - i18n: useTranslations from next-intl (replaces static strings)
+  - Tests: adjacent .test.tsx file with Jest + @testing-library
+
+BACKEND (Python APIFlask + SQLAlchemy 2.0):
+  - Blueprint: @blueprint.post/get/put/delete with @blueprint.input / @blueprint.output
+  - Schemas: marshmallow-based Schema classes (*_schema.py)
+  - Service functions: plain Python functions taking (db_session: db.Session, ...)
+  - SQLAlchemy: select(), db_session.execute(), .scalar_one_or_none()
+  - Errors: raise_flask_error(status_code, message)
+  - Audit: add_audit_event(db_session, entity, user, audit_event)
+  - Logging: logger = logging.getLogger(__name__); logger.info(..., extra={...})
+  - Auth: @api_key_multi_auth.login_required + current_user from auth utils
+  - Return: response.ApiResponse(message="Success", data=...)

@@ -1,0 +1,48 @@
+# AI Migration Tool -- Python Dependencies
+# Install: pip install -r requirements.txt
+# Python: 3.11+
+
+# ---- Core: Config Validation --------------------------------------------
+jsonschema>=4.21.0          # JSON Schema validation for skillset/rules configs
+
+# ---- Core: Template Engine ----------------------------------------------
+Jinja2>=3.1.4               # Jinja2 templates for code scaffolding
+
+# ---- Core: HTTP (used by Ollama native REST fallback) -------------------
+httpx>=0.27.0               # Async-capable HTTP client (also used by anthropic/openai SDKs)
+requests>=2.31.0            # Synchronous HTTP fallback for Ollama provider
+
+# ---- LLM: Cloud API Providers (install the ones you need) ---------------
+
+# Anthropic Claude (claude-opus-4-5, claude-3-5-sonnet, etc.)
+anthropic>=0.40.0
+
+# OpenAI GPT-4o / GPT-4 Turbo -- also covers Azure OpenAI
+# openai>=1.50.0
+
+# ---- LLM: Local / Self-hosted Providers (install the ones you need) -----
+
+# Ollama (llama3.2, mistral, deepseek-coder, etc.) -- requires Ollama server running
+# pip install ollama
+# ollama>=0.3.0
+
+# LM Studio, vLLM, Ollama /v1, Together AI, Fireworks, etc.
+# (uses the openai package with a custom base_url -- no extra package needed)
+
+# llama.cpp Python bindings for local GGUF models
+# NOTE: pre-built wheels available at https://github.com/abetlen/llama-cpp-python/releases
+#       GPU-accelerated build: CMAKE_ARGS="-DLLAMA_CUDA=on" pip install llama-cpp-python
+# llama-cpp-python>=0.2.90
+
+# ---- Core: AST Parsing --------------------------------------------------
+# tree-sitter>=0.23.0             # Language-agnostic AST parsing (optional)
+# tree-sitter-javascript>=0.23.0  # JS/TS grammar for tree-sitter
+# tree-sitter-c-sharp>=0.23.0     # C# grammar for tree-sitter
+# ^ tree-sitter is optional: the scoping agent falls back to regex if not installed
+
+# ---- Utilities ----------------------------------------------------------
+python-dateutil>=2.9.0      # Date/time utilities
+
+# ---- Development / Testing ----------------------------------------------
+pytest>=8.0.0
+pytest-cov>=5.0.0

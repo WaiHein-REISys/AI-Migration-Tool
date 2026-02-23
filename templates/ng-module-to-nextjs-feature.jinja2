@@ -1,0 +1,59 @@
+{#
+  Template: ng-module-to-nextjs-feature.jinja2
+  Mapping:  MAP-006
+  Source:   Angular 2 NgModule (*.module.ts)
+  Target:   Next.js feature folder index + barrel exports
+
+  Key translation rules:
+    @NgModule({ declarations: [FooComponent] }) → FooComponent.tsx in feature folder
+    @NgModule({ imports: [RouterModule] })       → next/navigation imports in components
+    @NgModule({ providers: [FooService] })       → src/services/foo/ module
+    @NgModule({ exports: [FooComponent] })       → export default / named export in .tsx
+    SharedModule imports                         → import from src/components/shared/
+    CommonModule                                 → built-in React (no import needed)
+    FormsModule / ReactiveFormsModule           → React controlled components / Zod validation
+    HttpClientModule                            → fetch() API (no module needed)
+    RouterModule.forChild(routes)               → Next.js App Router file-based routing
+
+  Output structure for a feature module:
+    frontend/src/components/{feature_name}/
+      ├── index.ts                  ← barrel exports (replaces @NgModule exports)
+      ├── {FeatureName}Component.tsx
+      ├── {FeatureName}Component.test.tsx
+      └── types.ts                  ← (optional) feature-specific types
+#}
+{# ---- index.ts (barrel export file) ---- #}
+{#
+  Replace NgModule's exports array with named exports from this barrel file.
+  Components consumed elsewhere import from "src/components/{feature_name}"
+#}
+
+{# TODO: LLM lists all components declared in @NgModule({ declarations: [...] }) #}
+export { default as {# ComponentName #} } from "./{# ComponentName #}";
+
+{# ---- Route registration (if RouterModule.forChild exists) ---- #}
+{#
+  Angular route:
+    { path: 'action-history', component: ActionHistoryComponent }
+
+  Next.js App Router equivalent:
+    Create: frontend/src/app/[locale]/{feature-path}/page.tsx
+    Content:
+      import { ActionHistoryComponent } from "src/components/action-history";
+      export default function ActionHistoryPage() {
+        return <ActionHistoryComponent />;
+      }
+
+  The LLM should generate the page.tsx stub noting the routing change.
+#}
+
+{# ---- Provider migration note ---- #}
+{#
+  Angular providers in @NgModule become:
+    - React Context providers   if they manage shared state
+    - Module-level imports      if they are pure service functions
+    - Custom hooks              if they wrap stateful logic
+
+  LLM should assess each provider from the declarations list and
+  determine the appropriate Next.js pattern.
+#}

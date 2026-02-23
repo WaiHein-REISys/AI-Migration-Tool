@@ -1,0 +1,14 @@
+{
+  "run_id": "conv-20260223-2241-cdbb21",
+  "feature": "ActionHistory",
+  "last_completed_step": "Step C3",
+  "completed_steps": [
+    "Step C1",
+    "Step C2",
+    "Step C3"
+  ],
+  "pending_steps": [],
+  "blocked_steps": [],
+  "block_reason": null,
+  "checkpoint_at": "2026-02-23T22:41:03.773772+00:00"
+}

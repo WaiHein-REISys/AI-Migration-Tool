@@ -1,0 +1,86 @@
+{#
+  Template: ng-service-to-fetcher.jinja2
+  Mapping:  MAP-002
+  Source:   Angular 2 @Injectable() service extending BaseService
+  Target:   Next.js typed async fetcher function(s)
+
+  Key translation rules:
+    @Injectable()               → named export functions (no class needed)
+    extends BaseService         → import from src/services/fetch/fetchers/fetchers
+    Http.post(url, body)        → fetch(url, { method: 'POST', body: JSON.stringify(...) })
+    Observable<T>               → Promise<T>
+    .catch(Observable.throw)    → try/catch with typed error
+    constructor(@Inject(Http))  → top-level import (no DI needed)
+    class properties            → module-level constants or closure variables
+    "server-only" methods       → add 'server-only' directive at top
+    "client-only" methods       → use useClientFetch hook instead
+#}
+{# Determine if this service makes direct DB/server calls or is pure HTTP proxy #}
+"server-only";
+{# Remove line above if method is client-side only and uses useClientFetch pattern #}
+
+import { ApiRequestError, UnauthorizedError } from "src/errors";
+import { getSession } from "src/services/auth/session";
+{# TODO: import specific fetcher helpers from src/services/fetch/fetchers/fetchers #}
+
+{# ---- Type definitions (from service method signatures) ---- #}
+{# TODO: LLM extracts Observable<ReturnType> generics from source methods #}
+{# and converts them to TypeScript interface / type alias below #}
+
+{#
+  Source service base URL: typically this.post(obj, 'endpoint')
+  where BaseService sets the area/controller path.
+  LLM must resolve the full API path from source constructor arg or solutionConfig.
+#}
+
+{# ---- Translated service methods as named async functions ---- #}
+{#
+  Each method in the source Angular service becomes one exported async function.
+  RxJS Observable patterns translate to:
+    - Promise<T>        for single-value streams
+    - AsyncGenerator<T> for multi-value streams (rare)
+
+  .pipe(map(...))       → inline transformation in the async function
+  .pipe(catchError(...))→ try/catch
+  .takeUntil(...)       → AbortController signal (if applicable)
+#}
+
+{# Example scaffold for a single method — LLM expands for all methods #}
+export const fetchContextData = async ({
+  {# TODO: LLM fills parameters from source method signature #}
+}: {
+  {# TODO: LLM fills TypeScript parameter types #}
+}): Promise<{
+  {# TODO: LLM fills return type from Observable<T> generic #}
+}> => {
+  const session = await getSession();
+  if (!session?.token) {
+    throw new UnauthorizedError("No active session");
+  }
+
+  const response = await fetch(
+    `${process.env.API_URL}/{# TODO: resolve endpoint path from solutionConfig #}`,
+    {
+      method: "POST",  {# or GET — match source Http verb #}
+      headers: {
+        "Content-Type": "application/json",
+        "X-SGG-Token": session.token,
+      },
+      body: JSON.stringify({
+        {# TODO: LLM maps source post() obj argument fields here #}
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new ApiRequestError(
+      "{# TODO: descriptive error message #}",
+      "APIRequestError",
+      response.status,
+    );
+  }
+
+  return (await response.json()) as {
+    {# TODO: return type interface #}
+  };
+};

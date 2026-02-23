@@ -1,0 +1,121 @@
+{
+  "$schema": "../config/schemas/rules-schema.json",
+  "title": "RulesConfig",
+  "version": "1.0",
+  "description": "Guardrails and enforcement rules for the GPRS -> simpler-grants-gov migration pipeline",
+
+  "guardrails": [
+    {
+      "id": "RULE-001",
+      "name": "preserve_api_contracts",
+      "description": "All REST endpoint routes, HTTP methods, and request/response field names must be functionally preserved. The target Python Flask route must accept the same logical payload and return the same logical response structure as the legacy C# controller action.",
+      "enforcement": "blocking",
+      "applies_to": ["backend"],
+      "validation": "api_contract_comparison",
+      "examples": {
+        "source": "[Route('api/context/getContext')] [HttpPost]",
+        "target": "@blueprint.post('/v1/context/get-context')"
+      }
+    },
+    {
+      "id": "RULE-002",
+      "name": "preserve_ui_css_class_names",
+      "description": "All existing CSS class names applied to HTML elements in legacy Angular templates must be preserved verbatim in the generated React JSX/TSX markup. AngularJS-internal prefixed classes (e.g. ng-*, angular-*) are excluded.",
+      "enforcement": "blocking",
+      "applies_to": ["frontend"],
+      "validation": "dom_class_audit",
+      "exclusions": ["ng-*", "angular-*"]
+    },
+    {
+      "id": "RULE-003",
+      "name": "no_business_logic_reinterpretation",
+      "description": "Business logic — including validation rules, conditionals, calculations, status assignments, and data transformations — must be translated verbatim. No optimization, no refactoring, no reordering of logic. If a C# method has a specific try/catch sequence, that same guard pattern must appear in Python. If an Angular component subscribes to data on ngOnInit and unsubscribes on ngOnDestroy, the React equivalent must replicate that lifecycle faithfully in useEffect.",
+      "enforcement": "blocking",
+      "applies_to": ["frontend", "backend", "database"]
+    },
+    {
+      "id": "RULE-004",
+      "name": "flag_ambiguous_mappings",
+      "description": "When a source pattern has no direct equivalent in the target stack, or when the AI confidence score falls below the configured threshold, the conversion must halt and emit an AMBIGUITY flag. The agent must NOT guess or approximate. Cross-feature dependencies (imports outside the declared feature boundary) must also be flagged before proceeding.",
+      "enforcement": "blocking",
+      "applies_to": ["frontend", "backend", "database"],
+      "examples": [
+        "pfm-layout/master LayoutService — external platform library, no direct equivalent",
+        "pfm-ng EventPublisher — no direct equivalent in React ecosystem",
+        "pfm-dcf FormInstanceCollectionArgsModel — external data collection framework"
+      ]
+    },
+    {
+      "id": "RULE-005",
+      "name": "no_out_of_boundary_changes",
+      "description": "The AI must not read, write, or modify any files outside the declared feature boundary folder. The boundary is defined by the feature_root path passed to the Scoping Agent. Any attempt to write to a file outside this boundary must be rejected and logged.",
+      "enforcement": "blocking",
+      "applies_to": ["all"]
+    },
+    {
+      "id": "RULE-006",
+      "name": "log_every_transformation",
+      "description": "Every file read, every rule applied, every template resolved, and every file written must produce a structured log entry in the ConversionLog. Halts and flags must also be logged with the specific reason. No silent failures.",
+      "enforcement": "blocking",
+      "applies_to": ["all"]
+    },
+    {
+      "id": "RULE-007",
+      "name": "preserve_typescript_types",
+      "description": "All TypeScript type annotations in Angular 2 source must be carried forward to the React/Next.js target. Where C# types exist, they must be translated to equivalent TypeScript interfaces or Python Pydantic models. No 'any' types unless the source itself uses 'any'.",
+      "enforcement": "warning",
+      "applies_to": ["frontend"]
+    },
+    {
+      "id": "RULE-008",
+      "name": "external_library_halt",
+      "description": "Imports from pfm-layout, pfm-ng, pfm-re, pfm-dcf, and other platform-specific libraries that have no equivalent in the target stack must be flagged immediately. The agent must identify what the library provides and pause for human decision: (a) find equivalent, (b) stub, or (c) exclude.",
+      "enforcement": "blocking",
+      "applies_to": ["frontend"],
+      "flagged_libraries": [
+        "pfm-layout",
+        "pfm-ng",
+        "pfm-re",
+        "pfm-dcf",
+        "Platform.CrossCutting8",
+        "Platform.Foundation8"
+      ]
+    },
+    {
+      "id": "RULE-009",
+      "name": "sqlalchemy_mapped_syntax",
+      "description": "All generated SQLAlchemy models must use the modern SQLAlchemy 2.0 Mapped[] type annotation syntax. Legacy Column() syntax is not permitted. All models must inherit from ApiSchemaTable and TimestampMixin.",
+      "enforcement": "blocking",
+      "applies_to": ["database"]
+    },
+    {
+      "id": "RULE-010",
+      "name": "audit_events_required",
+      "description": "Any backend service function that creates, updates, or deletes data must include an audit event call (add_audit_event) matching the pattern in the target reference codebase. This mirrors the logging requirements in the source C# services.",
+      "enforcement": "warning",
+      "applies_to": ["backend"]
+    }
+  ],
+
+  "ambiguity_thresholds": {
+    "confidence_floor": 0.75,
+    "action_below_floor": "flag_and_halt",
+    "confidence_scoring_factors": [
+      "Direct language equivalent exists",
+      "Mapping template covers pattern fully",
+      "No external/cross-feature dependencies",
+      "Business logic is self-contained",
+      "No platform-specific libraries"
+    ]
+  },
+
+  "out_of_scope_behavior": "reject_and_log",
+  "partial_conversion_handling": "checkpoint_and_resume",
+
+  "approval_gate": {
+    "required": true,
+    "timeout_hours": 72,
+    "approvers": ["Engineering Lead", "Business Analyst"],
+    "implementation": "cli_prompt"
+  }
+}

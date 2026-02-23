@@ -1,0 +1,231 @@
+{
+  "feature_name": "ActionHistory",
+  "feature_root": "Y:\\Solution\\HRSA\\HAB-GPRSSubmission\\src\\GPRSSubmission.Web\\wwwroot\\gprs_app\\ActionHistory",
+  "analyzed_at": "2026-02-23T19:20:05.720022+00:00",
+  "nodes": [
+    {
+      "id": "ActionHistory.component.ts",
+      "type": "frontend",
+      "lang": "TypeScript",
+      "pattern": "Angular 2 Component",
+      "exports": [
+        "ActionHistoryComponent"
+      ],
+      "imports": [
+        "@angular/core",
+        "@angular/router",
+        "pfm-layout/master",
+        "pfm-ng/core",
+        "rxjs/Subject",
+        "./ActionHistory.PageActionModel",
+        "./../core/constants",
+        "./../core/services/context.service",
+        "./../core/services/configuration.service"
+      ],
+      "selector": "ActionHistory",
+      "lifecycle_hooks": [
+        "OnInit",
+        "OnDestroy",
+        "AfterViewChecked"
+      ],
+      "uses_rxjs_subject": true
+    },
+    {
+      "id": "ActionHistory.module.ts",
+      "type": "frontend",
+      "lang": "TypeScript",
+      "pattern": "Angular 2 NgModule",
+      "exports": [
+        "ActionHistoryModule"
+      ],
+      "imports": [
+        "@angular/core",
+        "@angular/router",
+        "./ActionHistory.component",
+        "pfm-ng/components",
+        "pfm-re",
+        "./../core/services/context.service",
+        "./../core/services/configuration.service"
+      ]
+    },
+    {
+      "id": "ActionHistory.PageActionModel.ts",
+      "type": "frontend",
+      "lang": "TypeScript",
+      "pattern": "Angular 2 PageActionModel",
+      "exports": [
+        "ActionHistoryPageActionModel"
+      ],
+      "imports": [
+        "pfm-ng/components",
+        "pfm-ng/core",
+        "rxjs/Observable",
+        "rxjs/Subject",
+        "../Core/PageActions"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "ActionHistory.component.ts",
+      "to": "./ActionHistory.PageActionModel"
+    },
+    {
+      "from": "ActionHistory.module.ts",
+      "to": "./ActionHistory.component"
+    }
+  ],
+  "external_points": [
+    {
+      "from": "ActionHistory.component.ts",
+      "to": "@angular/core",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.component.ts",
+      "to": "@angular/router",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.component.ts",
+      "to": "pfm-layout/master",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.component.ts",
+      "to": "pfm-ng/core",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.component.ts",
+      "to": "rxjs/Subject",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.component.ts",
+      "to": "./../core/constants",
+      "type": "cross-feature"
+    },
+    {
+      "from": "ActionHistory.component.ts",
+      "to": "./../core/services/context.service",
+      "type": "cross-feature"
+    },
+    {
+      "from": "ActionHistory.component.ts",
+      "to": "./../core/services/configuration.service",
+      "type": "cross-feature"
+    },
+    {
+      "from": "ActionHistory.module.ts",
+      "to": "@angular/core",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.module.ts",
+      "to": "@angular/router",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.module.ts",
+      "to": "pfm-ng/components",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.module.ts",
+      "to": "pfm-re",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.module.ts",
+      "to": "./../core/services/context.service",
+      "type": "cross-feature"
+    },
+    {
+      "from": "ActionHistory.module.ts",
+      "to": "./../core/services/configuration.service",
+      "type": "cross-feature"
+    },
+    {
+      "from": "ActionHistory.PageActionModel.ts",
+      "to": "pfm-ng/components",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.PageActionModel.ts",
+      "to": "pfm-ng/core",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.PageActionModel.ts",
+      "to": "rxjs/Observable",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.PageActionModel.ts",
+      "to": "rxjs/Subject",
+      "type": "package"
+    },
+    {
+      "from": "ActionHistory.PageActionModel.ts",
+      "to": "../Core/PageActions",
+      "type": "cross-feature"
+    }
+  ],
+  "flags": [
+    {
+      "severity": "warning",
+      "rule": "RULE-004",
+      "message": "Cross-feature coupling detected: 'ActionHistory.component.ts' imports './../core/constants' which is outside the declared feature boundary.",
+      "recommendation": "Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1."
+    },
+    {
+      "severity": "warning",
+      "rule": "RULE-004",
+      "message": "Cross-feature coupling detected: 'ActionHistory.component.ts' imports './../core/services/context.service' which is outside the declared feature boundary.",
+      "recommendation": "Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1."
+    },
+    {
+      "severity": "warning",
+      "rule": "RULE-004",
+      "message": "Cross-feature coupling detected: 'ActionHistory.component.ts' imports './../core/services/configuration.service' which is outside the declared feature boundary.",
+      "recommendation": "Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1."
+    },
+    {
+      "severity": "warning",
+      "rule": "RULE-004",
+      "message": "Cross-feature coupling detected: 'ActionHistory.module.ts' imports './../core/services/context.service' which is outside the declared feature boundary.",
+      "recommendation": "Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1."
+    },
+    {
+      "severity": "warning",
+      "rule": "RULE-004",
+      "message": "Cross-feature coupling detected: 'ActionHistory.module.ts' imports './../core/services/configuration.service' which is outside the declared feature boundary.",
+      "recommendation": "Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1."
+    },
+    {
+      "severity": "warning",
+      "rule": "RULE-004",
+      "message": "Cross-feature coupling detected: 'ActionHistory.PageActionModel.ts' imports '../Core/PageActions' which is outside the declared feature boundary.",
+      "recommendation": "Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1."
+    },
+    {
+      "severity": "blocking",
+      "rule": "RULE-008",
+      "message": "External platform library detected: 'pfm-layout' (imported in ActionHistory.component.ts). No direct equivalent exists in the target stack.",
+      "recommendation": "Review 'pfm-layout' usage and decide: (a) find equivalent Next.js/Python package, (b) stub with a local implementation, or (c) exclude from scope. Cannot proceed until resolved."
+    },
+    {
+      "severity": "blocking",
+      "rule": "RULE-008",
+      "message": "External platform library detected: 'pfm-ng' (imported in ActionHistory.component.ts). No direct equivalent exists in the target stack.",
+      "recommendation": "Review 'pfm-ng' usage and decide: (a) find equivalent Next.js/Python package, (b) stub with a local implementation, or (c) exclude from scope. Cannot proceed until resolved."
+    },
+    {
+      "severity": "blocking",
+      "rule": "RULE-008",
+      "message": "External platform library detected: 'pfm-re' (imported in ActionHistory.module.ts). No direct equivalent exists in the target stack.",
+      "recommendation": "Review 'pfm-re' usage and decide: (a) find equivalent Next.js/Python package, (b) stub with a local implementation, or (c) exclude from scope. Cannot proceed until resolved."
+    }
+  ]
+}

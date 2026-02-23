@@ -1,0 +1,8 @@
+{#
+  Template: passthrough.jinja2
+  Fallback template used when no specific mapping template is found.
+  The LLM uses the source code directly with the conversion system prompt.
+#}
+{# No scaffold — source code passed directly to LLM with conversion prompt #}
+{# Source: {{ step.source_file }} #}
+{# Target: {{ step.target_file }} #}
