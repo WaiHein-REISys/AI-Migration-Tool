@@ -68,6 +68,47 @@
     }
   },
 
+  "target_stack_hrsa_pprs": {
+    "frontend": {
+      "framework": "Next.js",
+      "version": "16.1.6",
+      "react_version": "18.2.0",
+      "language": "TypeScript",
+      "version_ts": "5.9.3",
+      "styling": "CSS Modules (*.module.css)",
+      "module_system": "ESModules/App Router",
+      "component_pattern": "Functional React components with hooks, 'use client' directive, CSS Modules",
+      "service_pattern": "Typed async service functions calling shared apiGet/apiPost/apiPatch/apiDelete helpers",
+      "http_client": "Custom fetch wrappers in services/api.ts (apiGet, apiPost, apiPatch, apiDelete, apiPostMultipart)",
+      "state_management": "React hooks (useState, useEffect, useRef, useMemo)",
+      "routing": "Next.js App Router (next/navigation useRouter)",
+      "auth": "JWT stored in localStorage, sent as Authorization: Bearer header",
+      "component_structure": "Component folder with ComponentName.tsx + ComponentName.module.css + index.ts barrel",
+      "context": "React Context via contexts/LayoutContext and custom hooks"
+    },
+    "backend": {
+      "framework": "Python Flask",
+      "version": "3.0.0",
+      "language": "Python",
+      "api_pattern": "Flask Blueprints (Blueprint class) with @bp.route decorators",
+      "orm": "None — raw SQL via psycopg2 with RealDictCursor",
+      "architecture": "Routes -> Services -> Repositories (3-layer)",
+      "di_pattern": "Function parameters; DB connection via get_db_connection()",
+      "logging": "Python logging.getLogger(__name__); logger.info/warning/error/exception",
+      "auth": "PyJWT (HS256, 24h expiry); global @app.before_request JWT middleware; g.user_id / g.username in request context",
+      "error_handling": "try/except in every route; return jsonify({'error': msg, 'detail': detail}), status_code",
+      "sentinel_pattern": "DB_UNAVAILABLE = object() to distinguish DB errors from auth failures",
+      "cors": "flask-cors CORS(app)"
+    },
+    "database": {
+      "engine": "PostgreSQL 14+",
+      "access_pattern": "Raw SQL with psycopg2 RealDictCursor; parameterised %s placeholders",
+      "migration_tool": "Custom Python scripts (database/init_db.py, database/seed_data.py)",
+      "connection": "get_db_connection() from config/database.py",
+      "jsonb_columns": "JSONB columns for flexible array/object data (e.g. participants, areas_of_review)"
+    }
+  },
+
   "component_mappings": [
     {
       "id": "MAP-001",
@@ -144,6 +185,33 @@
     }
   },
 
+  "project_structure_hrsa_pprs": {
+    "frontend": {
+      "components_root": "frontend/app/components/pages/{feature_name}/",
+      "core_components_root": "frontend/app/components/core/",
+      "services_root": "frontend/app/services/",
+      "contexts_root": "frontend/app/contexts/",
+      "types_root": "frontend/app/types/",
+      "pages_root": "frontend/app/{feature_name}/",
+      "component_structure": "ComponentName/ folder with ComponentName.tsx + ComponentName.module.css + index.ts",
+      "test_suffix": ".test.tsx"
+    },
+    "backend": {
+      "api_root": "backend/routes/",
+      "services_root": "backend/services/",
+      "repositories_root": "backend/repositories/",
+      "config_root": "backend/config/",
+      "utils_root": "backend/utils/",
+      "route_file_pattern": "{feature_name}_routes.py",
+      "service_file_pattern": "{feature_name}_service.py",
+      "repository_file_pattern": "{feature_name}_repository.py"
+    },
+    "database": {
+      "init_script": "database/init_db.py",
+      "seed_script": "database/seed_data.py"
+    }
+  },
+
   "naming_conventions": {
     "frontend": {
       "components": "PascalCase.tsx",
@@ -167,6 +235,7 @@
 
   "reference_codebases": {
     "source": "Y:/Solution/HRSA/HAB-GPRSSubmission",
-    "target": "Y:/Solution/HRSA/simpler-grants-gov"
+    "target_simpler_grants": "Y:/Solution/HRSA/simpler-grants-gov",
+    "target_hrsa_pprs": "Y:/Solution/HRSA/HRSA-Simpler-PPRS"
   }
 }

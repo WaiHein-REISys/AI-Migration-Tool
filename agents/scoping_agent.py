@@ -12,6 +12,7 @@ Requires:
     pip install tree-sitter tree-sitter-javascript tree-sitter-c-sharp
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -102,6 +103,10 @@ class ScopingAgent:
             self.feature_root.name, len(ts_files), len(cs_files), len(sql_files)
         )
 
+        # Compute a stable hash over the sorted content of all source files so
+        # save() can detect whether the sources have changed since the last run.
+        source_hash = self._compute_source_hash(ts_files + cs_files + sql_files)
+
         for f in ts_files:
             self._analyze_typescript_file(f)
         for f in cs_files:
@@ -111,6 +116,9 @@ class ScopingAgent:
 
         self._detect_cross_feature_coupling()
         self._detect_external_library_usage()
+
+        # Embed the hash so save() can compare it against the on-disk graph.
+        self.dependency_graph["source_hash"] = source_hash
 
         logger.info(
             "Scoping complete — %d nodes, %d edges, %d external points, %d flags.",
@@ -122,12 +130,50 @@ class ScopingAgent:
         return self.dependency_graph
 
     def save(self, output_path: str | Path) -> None:
-        """Persist the dependency graph to a JSON file."""
+        """
+        Persist the dependency graph to a JSON file.
+
+        Skips the write if an identical graph already exists at *output_path*
+        (same source_hash), avoiding redundant file churn on repeated runs.
+        """
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
+
+        current_hash = self.dependency_graph.get("source_hash", "")
+        if out.exists() and current_hash:
+            try:
+                with open(out, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                if existing.get("source_hash") == current_hash:
+                    logger.info(
+                        "Dependency graph unchanged (source_hash=%s) — skipping write: %s",
+                        current_hash, out,
+                    )
+                    return
+            except Exception:
+                pass  # Corrupt/unreadable existing file — overwrite it
+
         with open(out, "w", encoding="utf-8") as f:
             json.dump(self.dependency_graph, f, indent=2)
         logger.info("Dependency graph saved to: %s", out)
+
+    # ------------------------------------------------------------------
+    # Source hash computation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_source_hash(files: list[Path]) -> str:
+        """
+        Compute a SHA-1 hash over the sorted, concatenated content of *files*.
+        Stable across runs as long as source file content does not change.
+        """
+        h = hashlib.sha1()
+        for path in sorted(files, key=lambda p: str(p)):
+            try:
+                h.update(path.read_bytes())
+            except OSError:
+                pass
+        return h.hexdigest()
 
     # ------------------------------------------------------------------
     # TypeScript / Angular 2 analysis

@@ -1,0 +1,71 @@
+FRONTEND (Next.js 16 / React 18 / TypeScript 5 -- HRSA-Simpler-PPRS patterns):
+  - File structure: ComponentName/ folder with ComponentName.tsx, ComponentName.module.css, index.ts barrel
+  - Top of every client component: 'use client';
+  - Imports: useState, useEffect, useRef, useMemo from 'react'; useRouter from 'next/navigation'
+  - CSS: import styles from './ComponentName.module.css'; use styles.className (never inline or global classes)
+  - Props: define a Props interface above the component function
+  - HTTP calls: import { apiGet, apiPost, apiPatch, apiDelete } from '../services/api';
+    (never use fetch() directly in components -- always go through the shared api helpers)
+  - Auth: token lives in localStorage under key 'token'; never read/write it directly in components,
+    use authService helpers (getStoredUser, getStoredUsername, clearSession, logout)
+  - Error handling: catch errors from api helpers; set an error state string; render error message in JSX
+  - Activity tracking: api helpers dispatch 'apiActivity' CustomEvent automatically -- no manual dispatch needed
+  - 401 handling: api helpers automatically clear session and redirect to /login on 401
+  - Lifecycle: useEffect with [] for mount, return cleanup fn to replace ngOnDestroy; no RxJS
+  - State: useState for local state; Context (useLayout, LayoutContext) for shared layout state
+  - Subscriptions: replace RxJS Subject.takeUntil with AbortController or useState cleanup
+
+BACKEND ROUTES (Python Flask 3.0 -- HRSA-Simpler-PPRS patterns):
+  - File: backend/routes/{feature_name}_routes.py
+  - Blueprint: {feature_name}_bp = Blueprint("{feature_name}", __name__, url_prefix="/api/{feature_name}")
+  - Every route: @{feature_name}_bp.route("/path", methods=["GET"/"POST"/"PATCH"/"DELETE"])
+  - Every route body wrapped in try/except Exception as e: logger.exception(...); return jsonify({...}), 500
+  - Success: return jsonify({...}), 200
+  - Not found: return jsonify({"error": "...not found"}), 404
+  - Bad request: return jsonify({"error": "...", "detail": reason}), 400
+  - Read JSON body: body = request.get_json(silent=True) or {}
+  - Read query param: value = request.args.get("param_name")
+  - Auth context: g.user_id, g.username (set by global JWT middleware, never set manually)
+  - Register in app.py: from routes.{feature_name}_routes import {feature_name}_bp; app.register_blueprint({feature_name}_bp)
+
+BACKEND SERVICES (Python Flask 3.0 -- HRSA-Simpler-PPRS patterns):
+  - File: backend/services/{feature_name}_service.py
+  - logger = logging.getLogger(__name__)
+  - Plain functions; no classes; delegate all DB access to repository functions
+  - Import: from repositories.{feature_name}_repository import get_..., update_..., create_..., delete_...
+  - Sentinel: DB_UNAVAILABLE = object() -- return this sentinel when get_db_connection() returns None
+  - Callers check: if result is DB_UNAVAILABLE: return jsonify({...}), 503
+
+BACKEND REPOSITORIES (Python Flask 3.0 -- HRSA-Simpler-PPRS patterns):
+  - File: backend/repositories/{feature_name}_repository.py
+  - logger = logging.getLogger(__name__)
+  - from config.database import get_db_connection
+  - Pattern for every function:
+      conn = None
+      try:
+          conn = get_db_connection()
+          if not conn:
+              return None  # or [] for lists
+          conn.autocommit = True
+          cursor = conn.cursor()
+          cursor.execute("SELECT ... FROM ... WHERE col = %s", (value,))
+          rows = cursor.fetchall()   # returns list of RealDictRow (dict-like)
+          cursor.close()
+          return rows
+      except Exception as e:
+          logger.exception("function_name: error %s", e)
+          return None
+      finally:
+          if conn:
+              conn.close()
+  - Never use string formatting for SQL -- always parameterised %s placeholders
+  - JSONB columns: read as Python dict/list directly from RealDictRow; write with json.dumps() if needed
+
+DATABASE (PostgreSQL 14+ -- HRSA-Simpler-PPRS patterns):
+  - Raw DDL in database/init_db.py; no ORM
+  - Primary key: id SERIAL PRIMARY KEY
+  - Timestamps: created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+  - Foreign keys: REFERENCES public.{parent_table}(id) ON DELETE CASCADE
+  - Arrays / objects: JSONB DEFAULT '[]' or JSONB DEFAULT '{}'
+  - Unique constraints: UNIQUE(col1, col2) or UNIQUE(col)
+  - Connection string from env: DATABASE_URL or individual DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD vars

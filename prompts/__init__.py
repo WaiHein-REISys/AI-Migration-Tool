@@ -61,9 +61,11 @@ def load_prompt(filename: str) -> str:
     """
     path = PROMPTS_DIR / filename
     if not path.exists():
+        available = [f.name for f in PROMPTS_DIR.iterdir()
+                     if f.is_file() and f.suffix in {".txt", ".md"}]
         raise FileNotFoundError(
             f"Prompt file not found: {path}\n"
-            f"Available prompts: {[f.name for f in PROMPTS_DIR.glob('*.txt') + list(PROMPTS_DIR.glob('*.md'))]}"
+            f"Available prompts: {sorted(available)}"
         )
     content = path.read_text(encoding="utf-8").rstrip()
     logger.debug("Loaded prompt '%s' (%d chars)", filename, len(content))

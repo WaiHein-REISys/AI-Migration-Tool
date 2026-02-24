@@ -1,8 +1,8 @@
-# Plan Document — ActionHistory
+# Plan Document -- ActionHistory
 
-**Generated:** 2026-02-23T19:20:23.381693+00:00
+**Generated:** 2026-02-24T21:52:20.936740+00:00
 **Status:** PENDING APPROVAL
-**Run ID:** conv-20260223-1920-1a53be
+**Run ID:** conv-actionhistory-sg-c80ea94c
 **Feature Root:** `Y:\Solution\HRSA\HAB-GPRSSubmission\src\GPRSSubmission.Web\wwwroot\gprs_app\ActionHistory`
 
 ---
@@ -29,19 +29,19 @@
 
 ## 3. Step-by-Step Conversion Sequence
 
-### Step C1: ActionHistory.component.ts → `ActionHistoryComponent.tsx` (React functional component)
+### Step C1: ActionHistory.component.ts -> `ActionHistoryComponent.tsx` (React functional component)
 - **Mapping:** MAP-001 (Angular 2 NgModule @Component with RxJS Subject lifecycle)
 - **Rules:** RULE-003 (no business logic reinterpretation), RULE-002 (preserve CSS class names)
 - **Template:** `templates/ng-component-to-react.jinja2`
 - **Notes:** Replace OnInit/OnDestroy with useEffect, Subject.takeUntil with AbortController or cleanup function, @Inject() with props/hooks
 
-### Step C2: ActionHistory.module.ts → `ActionHistoryModule.tsx` (React functional component)
+### Step C2: ActionHistory.module.ts -> `ActionHistoryModule.tsx` (React functional component)
 - **Mapping:** MAP-006 (Angular 2 NgModule (*.module.ts with declarations/imports/providers))
 - **Rules:** RULE-003 (no business logic reinterpretation), RULE-002 (preserve CSS class names)
 - **Template:** `templates/ng-module-to-nextjs-feature.jinja2`
 - **Notes:** NgModule declarations become component files in a feature folder, providers become service modules, imports become type imports
 
-### Step C3: ActionHistory.PageActionModel.ts → `ActionHistoryPageActionModel.tsx` (React functional component)
+### Step C3: ActionHistory.PageActionModel.ts -> `ActionHistoryPageActionModel.tsx` (React functional component)
 - **Mapping:** MAP-001 (Angular 2 NgModule @Component with RxJS Subject lifecycle)
 - **Rules:** RULE-003 (no business logic reinterpretation), RULE-002 (preserve CSS class names)
 - **Template:** `templates/ng-component-to-react.jinja2`
@@ -60,47 +60,47 @@
 
 ## 5. Risk Areas & Ambiguities
 
-### ⚠️ WARNING — RISK-001: RULE-004
+### [WARNING] -- RISK-001: RULE-004
 **Message:** Cross-feature coupling detected: 'ActionHistory.component.ts' imports './../core/constants' which is outside the declared feature boundary.
 
 **Recommendation:** Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1.
 
-### ⚠️ WARNING — RISK-002: RULE-004
+### [WARNING] -- RISK-002: RULE-004
 **Message:** Cross-feature coupling detected: 'ActionHistory.component.ts' imports './../core/services/context.service' which is outside the declared feature boundary.
 
 **Recommendation:** Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1.
 
-### ⚠️ WARNING — RISK-003: RULE-004
+### [WARNING] -- RISK-003: RULE-004
 **Message:** Cross-feature coupling detected: 'ActionHistory.component.ts' imports './../core/services/configuration.service' which is outside the declared feature boundary.
 
 **Recommendation:** Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1.
 
-### ⚠️ WARNING — RISK-004: RULE-004
+### [WARNING] -- RISK-004: RULE-004
 **Message:** Cross-feature coupling detected: 'ActionHistory.module.ts' imports './../core/services/context.service' which is outside the declared feature boundary.
 
 **Recommendation:** Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1.
 
-### ⚠️ WARNING — RISK-005: RULE-004
+### [WARNING] -- RISK-005: RULE-004
 **Message:** Cross-feature coupling detected: 'ActionHistory.module.ts' imports './../core/services/configuration.service' which is outside the declared feature boundary.
 
 **Recommendation:** Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1.
 
-### ⚠️ WARNING — RISK-006: RULE-004
+### [WARNING] -- RISK-006: RULE-004
 **Message:** Cross-feature coupling detected: 'ActionHistory.PageActionModel.ts' imports '../Core/PageActions' which is outside the declared feature boundary.
 
 **Recommendation:** Determine whether this dependency should be (a) included in scope, (b) stubbed, or (c) treated as an external API contract. Resolve before Step C1.
 
-### 🚫 BLOCKING — RISK-007: RULE-008
+### [BLOCKING] -- RISK-007: RULE-008
 **Message:** External platform library detected: 'pfm-layout' (imported in ActionHistory.component.ts). No direct equivalent exists in the target stack.
 
 **Recommendation:** Review 'pfm-layout' usage and decide: (a) find equivalent Next.js/Python package, (b) stub with a local implementation, or (c) exclude from scope. Cannot proceed until resolved.
 
-### 🚫 BLOCKING — RISK-008: RULE-008
+### [BLOCKING] -- RISK-008: RULE-008
 **Message:** External platform library detected: 'pfm-ng' (imported in ActionHistory.component.ts). No direct equivalent exists in the target stack.
 
 **Recommendation:** Review 'pfm-ng' usage and decide: (a) find equivalent Next.js/Python package, (b) stub with a local implementation, or (c) exclude from scope. Cannot proceed until resolved.
 
-### 🚫 BLOCKING — RISK-009: RULE-008
+### [BLOCKING] -- RISK-009: RULE-008
 **Message:** External platform library detected: 'pfm-re' (imported in ActionHistory.module.ts). No direct equivalent exists in the target stack.
 
 **Recommendation:** Review 'pfm-re' usage and decide: (a) find equivalent Next.js/Python package, (b) stub with a local implementation, or (c) exclude from scope. Cannot proceed until resolved.

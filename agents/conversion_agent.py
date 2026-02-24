@@ -19,6 +19,18 @@ LLM support is provided via LLMRouter -- any configured provider works:
     Ollama (local), LlamaCpp (local GGUF).
 Pass llm_router=None to operate in template-only / scaffold mode.
 
+Prompts are loaded from the prompts/ directory at runtime:
+
+  Target: simpler_grants (default)
+    prompts/conversion_system.txt          -- LLM system prompt template
+    prompts/conversion_target_stack.txt    -- Target stack reference (APIFlask/SQLAlchemy)
+
+  Target: hrsa_pprs
+    prompts/conversion_system_hrsa_pprs.txt       -- LLM system prompt for HRSA-Simpler-PPRS
+    prompts/conversion_target_stack_hrsa_pprs.txt -- Target stack reference (Flask/psycopg2)
+
+Both system prompt files contain {rules_text} and {target_stack_summary} placeholders.
+
 Requires:
     pip install jinja2
 """
@@ -34,6 +46,7 @@ except ImportError:
     raise ImportError("jinja2 is required. pip install jinja2")
 
 from agents.conversion_log import ConversionLog
+from prompts import load_prompt
 
 if TYPE_CHECKING:
     from agents.llm import LLMRouter
@@ -49,62 +62,6 @@ class AmbiguityException(Exception):
 
 class OutOfBoundaryException(Exception):
     """Raised when a write target falls outside the declared feature boundary."""
-
-# ---------------------------------------------------------------------------
-# LLM conversion system prompt
-# ---------------------------------------------------------------------------
-
-CONVERSION_SYSTEM_PROMPT_TEMPLATE = """
-You are a code conversion engine. You translate legacy GPRS Angular 2 /
-ASP.NET Core source code into the modern target stack used by
-simpler-grants-gov (Next.js 15 / React 19 / TypeScript strict for frontend;
-Python APIFlask + SQLAlchemy 2.0 for backend).
-
-MANDATORY GUARDRAILS -- violations will be rejected:
-{rules_text}
-
-CRITICAL CONSTRAINTS:
-- Do NOT optimize, refactor, or improve logic. Translate VERBATIM.
-- Do NOT change REST endpoint routes, HTTP methods, or payload field names.
-- Preserve ALL CSS class names from the source HTML template exactly.
-- Do NOT import from pfm-layout, pfm-ng, pfm-re, pfm-dcf, Platform.*
-  If the source depends on one of these, respond with:
-    AMBIGUOUS: <clear description of what the library provides and why you cannot proceed>
-- If you cannot translate ANY section with high confidence, respond with:
-    AMBIGUOUS: <reason>
-  and do NOT generate code for that section.
-- Output ONLY the converted code. No explanations, no markdown fences, no comments
-  unless the original source had comments.
-- Preserve all original developer comments, translated to the target language.
-
-TARGET STACK PATTERNS:
-{target_stack_summary}
-"""
-
-TARGET_STACK_SUMMARY = """
-FRONTEND (Next.js 15 / React 19 / TypeScript):
-  - Functional components with "use client" or "use server" directive at top
-  - useState, useEffect, useCallback, useContext for state/lifecycle
-  - Typed props interfaces, no 'any' unless source uses 'any'
-  - Import from 'next/navigation' (useRouter, useSearchParams)
-  - HTTP: fetch() API or useClientFetch custom hook
-  - Subscriptions: useEffect with cleanup return function (replaces ngOnDestroy)
-  - Error: typed error classes from src/errors
-  - Logging: console.error() with structured context
-  - i18n: useTranslations from next-intl (replaces static strings)
-  - Tests: adjacent .test.tsx file with Jest + @testing-library
-
-BACKEND (Python APIFlask + SQLAlchemy 2.0):
-  - Blueprint: @blueprint.post/get/put/delete with @blueprint.input / @blueprint.output
-  - Schemas: marshmallow-based Schema classes (*_schema.py)
-  - Service functions: plain Python functions taking (db_session: db.Session, ...)
-  - SQLAlchemy: select(), db_session.execute(), .scalar_one_or_none()
-  - Errors: raise_flask_error(status_code, message)
-  - Audit: add_audit_event(db_session, entity, user, audit_event)
-  - Logging: logger = logging.getLogger(__name__); logger.info(..., extra={...})
-  - Auth: @api_key_multi_auth.login_required + current_user from auth utils
-  - Return: response.ApiResponse(message="Success", data=...)
-"""
 
 
 class ConversionAgent:
@@ -143,9 +100,20 @@ class ConversionAgent:
         If True, generate code in memory / logs but write no files to disk.
     llm_router : LLMRouter | None
         Pre-built LLMRouter instance.  Pass None to use template-only mode.
+    target : str
+        Target stack identifier:
+        'simpler_grants' (default) -- Next.js 15 / APIFlask / SQLAlchemy 2.0
+        'hrsa_pprs'                -- Next.js 16 / Flask 3.0 / psycopg2 (HRSA-Simpler-PPRS)
+        Controls which prompt files are loaded from prompts/.
     """
 
     TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+
+    # Map target -> (system_prompt_file, target_stack_file)
+    _PROMPT_FILES: dict[str, tuple[str, str]] = {
+        "simpler_grants": ("conversion_system.txt",           "conversion_target_stack.txt"),
+        "hrsa_pprs":      ("conversion_system_hrsa_pprs.txt", "conversion_target_stack_hrsa_pprs.txt"),
+    }
 
     def __init__(
         self,
@@ -155,6 +123,7 @@ class ConversionAgent:
         output_root: str | Path,
         dry_run: bool = False,
         llm_router: "LLMRouter | None" = None,
+        target: str = "simpler_grants",
     ) -> None:
         self.plan        = approved_plan
         self.config      = config
@@ -162,6 +131,18 @@ class ConversionAgent:
         self.output_root = Path(output_root)
         self.dry_run     = dry_run
         self._router     = llm_router
+        self.target      = target
+
+        # Resolve prompt filenames; fall back to simpler_grants for unknown targets
+        self._system_prompt_file, self._target_stack_file = self._PROMPT_FILES.get(
+            target, self._PROMPT_FILES["simpler_grants"]
+        )
+        logger.debug(
+            "ConversionAgent initialised: target=%s, system_prompt=%s, target_stack=%s",
+            target,
+            self._system_prompt_file,
+            self._target_stack_file,
+        )
 
         self._jinja = Environment(
             loader=FileSystemLoader(str(self.TEMPLATES_DIR)),
@@ -372,9 +353,9 @@ class ConversionAgent:
         rules_text = "\n".join(
             f"- {r['id']} ({r['name']}): {r['description']}" for r in applicable_rules
         )
-        system_prompt = CONVERSION_SYSTEM_PROMPT_TEMPLATE.format(
+        system_prompt = load_prompt(self._system_prompt_file).format(
             rules_text=rules_text,
-            target_stack_summary=TARGET_STACK_SUMMARY,
+            target_stack_summary=load_prompt(self._target_stack_file),
         )
 
         template_hint = (

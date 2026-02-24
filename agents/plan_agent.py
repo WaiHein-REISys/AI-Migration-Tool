@@ -11,6 +11,16 @@ LLM support is provided via LLMRouter -- any configured provider works:
     Anthropic Claude, OpenAI GPT, OpenAI-compatible (LM Studio / vLLM / Azure),
     Ollama (local), LlamaCpp (local GGUF).
 Pass llm_router=None or use --no-llm to run in template-only mode.
+
+Prompts are loaded from the prompts/ directory at runtime:
+
+  Target: simpler_grants (default)
+    prompts/plan_system.txt               -- LLM system prompt
+    prompts/plan_document_template.md     -- Markdown scaffold (template-only mode)
+
+  Target: hrsa_pprs
+    prompts/plan_system_hrsa_pprs.txt     -- LLM system prompt for HRSA-Simpler-PPRS
+    prompts/plan_document_template.md     -- same shared Markdown scaffold
 """
 
 import json
@@ -20,101 +30,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from prompts import load_prompt
+
 if TYPE_CHECKING:
     from agents.llm import LLMRouter
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# System prompt for the LLM plan generation
-# ---------------------------------------------------------------------------
-
-PLAN_GENERATION_SYSTEM_PROMPT = """
-You are a senior migration architect specialising in modernising legacy
-Angular 2 / ASP.NET Core applications to Next.js 15 (React 19) + Python
-Flask (APIFlask) + SQLAlchemy 2.0.
-
-Your task is to generate a structured Plan Document in Markdown.
-
-STRICT RULES -- violations will be rejected by the pipeline:
-1. Do NOT generate any production code in this document. This is a PLAN only.
-2. Every component mapping MUST reference a specific rule by its RULE-XXX id.
-3. If a mapping cannot be determined with >75% confidence, mark it AMBIGUOUS
-   and do NOT guess. List what information is needed to resolve it.
-4. Business logic that cannot be cleanly translated must be marked BLOCKED,
-   not interpreted or improvised.
-5. Any import from flagged platform libraries (pfm-layout, pfm-ng, pfm-re,
-   pfm-dcf, Platform.CrossCutting8, Platform.Foundation8) must be flagged
-   under Risk Areas and marked BLOCKED until resolved.
-6. Output ONLY valid Markdown matching the schema below. No extra prose.
-7. The Plan Document is a contract. Humans will sign off before execution.
-
-TARGET STACK PATTERNS (from simpler-grants-gov reference):
-  - Frontend components: Next.js 15 functional React components, hooks, TypeScript strict
-  - Frontend services: Typed async fetchers (server-only or client hooks)
-  - Backend routes: Python APIFlask blueprints with Pydantic schemas
-  - Backend services: SQLAlchemy 2.0 service functions with db.Session
-  - DB models: ApiSchemaTable + TimestampMixin, Mapped[] syntax, UUID PKs
-  - Auth: JWT + multi-auth strategies
-  - Error handling: raise_flask_error() for backend, typed error classes for frontend
-  - Audit: add_audit_event() calls on all data mutations
-"""
-
-PLAN_DOCUMENT_TEMPLATE = """# Plan Document -- {feature_name}
-
-**Generated:** {generated_at}
-**Status:** PENDING APPROVAL
-**Run ID:** {run_id}
-**Feature Root:** `{feature_root}`
-
----
-
-## 1. Current Architecture Breakdown
-
-| Component | Type | Pattern | File |
-|---|---|---|---|
-{architecture_table}
-
----
-
-## 2. Proposed Target Architecture
-
-| Source Component | Target Component | Mapping ID | Rules Applied | Template |
-|---|---|---|---|---|
-{target_table}
-
----
-
-## 3. Step-by-Step Conversion Sequence
-
-{conversion_steps}
-
----
-
-## 4. Business Logic Inventory
-
-| Logic Item | Location | Preservation Method | Status |
-|---|---|---|---|
-{business_logic_table}
-
----
-
-## 5. Risk Areas & Ambiguities
-
-{risk_areas}
-
----
-
-## 6. Acceptance Criteria
-
-{acceptance_criteria}
-
----
-
-**APPROVAL REQUIRED TO PROCEED TO EXECUTION**
-
-Sign-off by: ___________________ Date: ___________
-"""
 
 
 class PlanAgent:
@@ -141,7 +62,18 @@ class PlanAgent:
     llm_router : LLMRouter | None
         Pre-built LLMRouter instance.  Pass None (or use --no-llm) to
         disable LLM calls and fall back to template-only generation.
+    target : str
+        Target stack identifier:
+        'simpler_grants' (default) -- Next.js 15 / APIFlask / SQLAlchemy 2.0
+        'hrsa_pprs'                -- Next.js 16 / Flask 3.0 / psycopg2 (HRSA-Simpler-PPRS)
+        Controls which prompt files are loaded from prompts/.
     """
+
+    # Map target -> system prompt filename in prompts/
+    _SYSTEM_PROMPT_FILES: dict[str, str] = {
+        "simpler_grants": "plan_system.txt",
+        "hrsa_pprs":      "plan_system_hrsa_pprs.txt",
+    }
 
     def __init__(
         self,
@@ -150,12 +82,24 @@ class PlanAgent:
         run_id: str,
         plans_dir: str | Path = "plans",
         llm_router: "LLMRouter | None" = None,
+        target: str = "simpler_grants",
     ) -> None:
         self.graph      = dependency_graph
         self.config     = config
         self.run_id     = run_id
         self.plans_dir  = Path(plans_dir)
         self._router    = llm_router
+        self.target     = target
+
+        # Resolve system prompt filename; fall back gracefully for unknown targets
+        self._system_prompt_file = self._SYSTEM_PROMPT_FILES.get(
+            target, self._SYSTEM_PROMPT_FILES["simpler_grants"]
+        )
+        logger.debug(
+            "PlanAgent initialised: target=%s, system_prompt=%s",
+            target,
+            self._system_prompt_file,
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -165,10 +109,32 @@ class PlanAgent:
         """
         Generate the Plan Document.
 
+        If a plan file already exists for this run_id (stable/deterministic),
+        the existing file is returned immediately without calling the LLM or
+        rebuilding from template -- avoiding duplicate artefacts on re-runs.
+
         Returns:
             (plan_markdown_str, plan_file_path)
         """
         feature_name = self.graph.get("feature_name", "unknown-feature")
+
+        # -- Dedup check: return existing plan if one was already saved --
+        slug     = re.sub(r"[^\w-]", "-", feature_name.lower())
+        existing = sorted(
+            self.plans_dir.glob(f"{slug}-plan-*-{self.run_id[:8]}*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        ) if self.plans_dir.exists() else []
+
+        if existing:
+            plan_path = existing[0]
+            plan_md   = plan_path.read_text(encoding="utf-8")
+            logger.info(
+                "Plan already exists for run_id=%s — reusing: %s",
+                self.run_id, plan_path,
+            )
+            return plan_md, plan_path
+
         logger.info("Generating plan document for feature: %s", feature_name)
 
         if self._router is not None and self._router.is_available:
@@ -205,7 +171,7 @@ class PlanAgent:
 
         try:
             response = self._router.complete(
-                system=PLAN_GENERATION_SYSTEM_PROMPT,
+                system=load_prompt(self._system_prompt_file),
                 messages=[LLMMessage(role="user", content=user_message)],
             )
             logger.info(
@@ -322,7 +288,7 @@ class PlanAgent:
         crit.append("- [ ] No imports from pfm-* or Platform.* libraries in converted code")
         acceptance_criteria_md = "\n".join(crit)
 
-        return PLAN_DOCUMENT_TEMPLATE.format(
+        return load_prompt("plan_document_template.md").format(
             feature_name         = feature_name,
             generated_at         = datetime.now(timezone.utc).isoformat(),
             run_id               = self.run_id,
@@ -368,8 +334,12 @@ class PlanAgent:
         if tp == "frontend":
             return f"`{name}.tsx` (React functional component)"
         if tp == "backend":
+            if self.target == "hrsa_pprs":
+                return f"`{self._to_snake(name)}_routes.py` (Flask Blueprint)"
             return f"`{self._to_snake(name)}_routes.py` (APIFlask blueprint)"
         if tp == "database":
+            if self.target == "hrsa_pprs":
+                return f"`{self._to_snake(name)}_repository.py` (psycopg2 repository)"
             return f"`{self._to_snake(name)}_service.py` (SQLAlchemy service)"
         return f"`{self._to_snake(name)}.py`"
 
@@ -384,8 +354,24 @@ class PlanAgent:
 
     def _save_plan(self, content: str, feature_name: str) -> Path:
         self.plans_dir.mkdir(parents=True, exist_ok=True)
-        ts   = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+        # Check whether a plan for this exact run_id was already written.
+        # run_id is now stable/deterministic, so re-running the same feature+target
+        # should reuse the existing plan rather than creating a duplicate.
         slug = re.sub(r"[^\w-]", "-", feature_name.lower())
+        existing = sorted(
+            self.plans_dir.glob(f"{slug}-plan-*-{self.run_id[:8]}*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if existing:
+            logger.info(
+                "Plan already exists for run_id=%s — reusing: %s",
+                self.run_id, existing[0],
+            )
+            return existing[0]
+
+        ts   = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         path = self.plans_dir / f"{slug}-plan-{ts}-{self.run_id[:8]}.md"
         path.write_text(content, encoding="utf-8")
         return path

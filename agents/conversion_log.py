@@ -52,6 +52,28 @@ class ConversionLog:
         self._started_at: str = datetime.now(timezone.utc).isoformat()
         self._completed_at: str | None = None
 
+        # If a completed log for this run already exists, reload it instead of
+        # overwriting it. This prevents duplicate entries on re-runs.
+        if self.log_path.exists():
+            try:
+                with open(self.log_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                if existing.get("status") in {"completed", "completed_with_flags"}:
+                    self._entries        = existing.get("entries", [])
+                    self._seq            = len(self._entries)
+                    self._status         = existing.get("status", "running")
+                    self._started_at     = existing.get("started_at", self._started_at)
+                    self._completed_at   = existing.get("completed_at")
+                    logger.info(
+                        "Reloaded existing completed conversion log: %s", self.log_path
+                    )
+                    return
+            except Exception as exc:
+                logger.debug(
+                    "Could not reload existing log (%s) — starting fresh: %s",
+                    self.log_path, exc,
+                )
+
         self._flush()   # initialise file
 
     # ------------------------------------------------------------------

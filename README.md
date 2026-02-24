@@ -1,10 +1,16 @@
 # AI Migration Tool
 
-**AI-Driven Legacy Codebase Modernization — GPRS -> simpler-grants-gov**
+**AI-Driven Legacy Codebase Modernization — GPRS -> modern target stack**
 
-Transforms `HAB-GPRSSubmission` (Angular 2.4 / ASP.NET Core 8) into the
-`simpler-grants-gov` target stack (Next.js 15 / React 19 / Python Flask / SQLAlchemy 2.0),
-one feature at a time, with full audit logging and human approval gates.
+Transforms `HAB-GPRSSubmission` (Angular 2.4 / ASP.NET Core 8) into your chosen
+target stack, one feature at a time, with full audit logging and human approval gates.
+
+### Supported target stacks
+
+| `--target` | Target stack | Reference codebase |
+|---|---|---|
+| `simpler_grants` *(default)* | Next.js 15 / React 19 / APIFlask / SQLAlchemy 2.0 | `Y:\Solution\HRSA\simpler-grants-gov` |
+| `hrsa_pprs` | Next.js 16 / React 18 / Flask 3.0 / psycopg2 raw SQL | `Y:\Solution\HRSA\HRSA-Simpler-PPRS` |
 
 The tool supports **any LLM backend** — Anthropic Claude, OpenAI GPT, local Ollama models,
 LM Studio / vLLM (OpenAI-compatible), and local GGUF files via llama.cpp.
@@ -97,6 +103,15 @@ python main.py --run-id conv-20260223-143012-abc123 --resume --feature-root "...
 python main.py --feature-root "..." --feature-name "ActionHistory" --mode full --no-llm --auto-approve
 ```
 
+**Target HRSA-Simpler-PPRS** (Next.js 16 / Flask 3.0 / psycopg2 raw SQL)
+```bash
+python main.py \
+  --feature-root "Y:/Solution/HRSA/HAB-GPRSSubmission/src/GPRSSubmission.Web/wwwroot/gprs_app/ActionHistory" \
+  --feature-name "ActionHistory" \
+  --mode full \
+  --target hrsa_pprs
+```
+
 ---
 
 ## LLM Providers
@@ -176,6 +191,12 @@ python main.py --feature-root "..." --feature-name "MyFeature" --mode full \
   --no-llm --auto-approve
 ```
 
+### Target stack selection
+
+| Flag | Choices | Default | Description |
+|---|---|---|---|
+| `--target` | `simpler_grants` \| `hrsa_pprs` | `simpler_grants` | Select which target stack to migrate to. Controls project structure paths and which LLM prompts are used. |
+
 ### LLM CLI flags reference
 
 | Flag | Default | Description |
@@ -252,6 +273,17 @@ ai-migration-tool/
 │           ├── ollama_provider.py       # Ollama native REST (local)
 │           └── llamacpp_provider.py     # Local GGUF files via llama.cpp
 │
+├── prompts/                         # LLM prompt files (edit without touching Python)
+│   ├── __init__.py                  # load_prompt() / list_prompts() loader with LRU cache
+│   ├── README.md                    # Prompt editing guide
+│   ├── plan_system.txt                      # PlanAgent system prompt (simpler_grants target)
+│   ├── plan_system_hrsa_pprs.txt            # PlanAgent system prompt (hrsa_pprs target)
+│   ├── plan_document_template.md            # Shared Markdown scaffold (template-only mode)
+│   ├── conversion_system.txt                # ConversionAgent system prompt (simpler_grants)
+│   ├── conversion_system_hrsa_pprs.txt      # ConversionAgent system prompt (hrsa_pprs)
+│   ├── conversion_target_stack.txt          # Target stack reference (simpler_grants)
+│   └── conversion_target_stack_hrsa_pprs.txt # Target stack reference (hrsa_pprs)
+│
 ├── config/
 │   ├── skillset-config.json         # Source/target stack + component mappings
 │   ├── rules-config.json            # Guardrails (RULE-001 to RULE-010)
@@ -312,10 +344,34 @@ ai-migration-tool/
 
 ## Reference Codebases
 
-| Role | Path |
-|---|---|
-| Source (legacy) | `Y:\Solution\HRSA\HAB-GPRSSubmission` |
-| Target (reference) | `Y:\Solution\HRSA\simpler-grants-gov` |
+| Role | `--target` | Path |
+|---|---|---|
+| Source (legacy) | *(all)* | `Y:\Solution\HRSA\HAB-GPRSSubmission` |
+| Target — simpler-grants-gov | `simpler_grants` | `Y:\Solution\HRSA\simpler-grants-gov` |
+| Target — HRSA-Simpler-PPRS | `hrsa_pprs` | `Y:\Solution\HRSA\HRSA-Simpler-PPRS` |
+
+---
+
+## Prompts
+
+All LLM prompts live in the `prompts/` directory as plain `.txt` / `.md` files.
+They are loaded at runtime via `prompts.load_prompt()` and cached in memory,
+so they can be edited independently of the Python source code.
+
+Each target stack (`--target`) has its own set of system prompts:
+
+| File | Target | Purpose |
+|---|---|---|
+| `prompts/plan_system.txt` | `simpler_grants` | System prompt sent to the LLM for plan generation |
+| `prompts/plan_system_hrsa_pprs.txt` | `hrsa_pprs` | System prompt for plan generation (HRSA-Simpler-PPRS) |
+| `prompts/plan_document_template.md` | *(shared)* | Markdown scaffold used in template-only (no-LLM) mode |
+| `prompts/conversion_system.txt` | `simpler_grants` | System prompt for code conversion (has `{rules_text}` and `{target_stack_summary}` placeholders) |
+| `prompts/conversion_system_hrsa_pprs.txt` | `hrsa_pprs` | System prompt for code conversion (HRSA-Simpler-PPRS) |
+| `prompts/conversion_target_stack.txt` | `simpler_grants` | Target stack reference injected into `conversion_system.txt` |
+| `prompts/conversion_target_stack_hrsa_pprs.txt` | `hrsa_pprs` | Target stack reference for HRSA-Simpler-PPRS (Flask/psycopg2 patterns) |
+
+To tune a prompt, open the file directly and edit the text — no Python changes needed.
+See [`prompts/README.md`](prompts/README.md) for full details.
 
 ---
 
@@ -325,6 +381,19 @@ ai-migration-tool/
 1. Create `agents/llm/providers/<name>_provider.py` implementing `BaseLLMProvider`
 2. Register it in `agents/llm/registry.py` under `_load_provider()` and add a `PROVIDER_*` constant
 3. Add the new provider name to the `--llm-provider` choices in `main.py`
+
+### Add or edit a prompt
+1. Open (or create) a `.txt` / `.md` file in `prompts/`
+2. Edit the text directly — `{placeholder}` tokens are filled at runtime by the agent
+3. If creating a new file, load it in your agent with `from prompts import load_prompt` then `load_prompt("my_prompt.txt")`
+4. Document it in `prompts/README.md` and the table in this file
+
+### Add a new target stack
+1. Add `target_stack_<name>` and `project_structure_<name>` blocks to `config/skillset-config.json`
+2. Create prompt files `prompts/plan_system_<name>.txt`, `prompts/conversion_system_<name>.txt`, `prompts/conversion_target_stack_<name>.txt`
+3. Register the target in `PlanAgent._SYSTEM_PROMPT_FILES` and `ConversionAgent._PROMPT_FILES` in the respective agent files
+4. Add the new target name to `--target` choices in `main.py`'s `build_arg_parser()` and add the `structure_key` mapping in `_build_approved_plan()`
+5. Update this README and `prompts/README.md`
 
 ### Add a new component mapping
 1. Add a new entry to `config/skillset-config.json` -> `component_mappings`
@@ -345,4 +414,4 @@ python main.py \
 
 ---
 
-*AI Migration Tool v1.1 | Built for HRSA GPRS -> simpler-grants-gov migration*
+*AI Migration Tool v1.2 | Built for HRSA GPRS -> simpler-grants-gov / HRSA-Simpler-PPRS migration*

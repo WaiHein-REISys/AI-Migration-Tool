@@ -3,7 +3,9 @@
 AI Migration Tool -- CLI Runner
 ===============================
 Multi-agent pipeline for migrating HAB-GPRSSubmission (Angular 2 / ASP.NET Core)
-to the simpler-grants-gov target stack (Next.js 15 / Python Flask / SQLAlchemy 2.0).
+to either:
+  • simpler_grants  -- Next.js 15 / APIFlask / SQLAlchemy 2.0  (default)
+  • hrsa_pprs       -- Next.js 16 / Flask 3.0 / psycopg2 raw SQL (HRSA-Simpler-PPRS)
 
 Usage:
     python main.py --feature-root <path> --feature-name <name> [OPTIONS]
@@ -32,12 +34,17 @@ Examples:
 
     # Template-only / no LLM
     python main.py --feature-root "..." --feature-name "ActionHistory" --mode full --no-llm --auto-approve
+
+    # Target HRSA-Simpler-PPRS stack (Next.js 16 / Flask / psycopg2)
+    python main.py --feature-root "..." --feature-name "ActionHistory" --mode full --target hrsa_pprs
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -129,6 +136,51 @@ def _describe_router(router) -> str:
         return "configured (provider details unavailable)"
 
 # ---------------------------------------------------------------------------
+# Run ID helpers
+# ---------------------------------------------------------------------------
+
+def _stable_run_id(feature_name: str, feature_root: str, target: str) -> str:
+    """
+    Derive a deterministic run ID from the (feature_name, feature_root, target) triple.
+
+    Two runs with identical inputs produce the same ID, so all artefacts
+    (checkpoint, dependency graph, plan, conversion log) are written to the
+    same paths and subsequent runs skip re-creating them if nothing has changed.
+
+    Format:  conv-<feature_slug>-<target_abbrev>-<hash8>
+    Example: conv-actionhistory-sg-a1b2c3d4   (simpler_grants)
+             conv-actionhistory-hp-a1b2c3d4   (hrsa_pprs)
+    """
+    slug   = re.sub(r"[^\w]", "-", feature_name.lower())[:20].strip("-")
+    abbrev = {"simpler_grants": "sg", "hrsa_pprs": "hp"}.get(target, target[:4])
+    digest = hashlib.sha1(
+        f"{feature_root}|{target}".encode("utf-8")
+    ).hexdigest()[:8]
+    return f"conv-{slug}-{abbrev}-{digest}"
+
+
+def _is_run_complete(run_id: str) -> bool:
+    """
+    Return True if a checkpoint file for *run_id* exists and shows every
+    conversion step completed (i.e. pending_steps is empty and there are
+    completed steps recorded).
+    """
+    path = DEFAULT_CHECKPOINTS_DIR / f"{run_id}-checkpoint.json"
+    if not path.exists():
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        return (
+            bool(state.get("completed_steps"))
+            and not state.get("pending_steps")
+            and not state.get("blocked_steps")
+        )
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Pipeline orchestration
 # ---------------------------------------------------------------------------
 
@@ -141,13 +193,24 @@ def run_pipeline(args: argparse.Namespace) -> int:
     llm_router = build_llm_router(args)
 
     # ---- Generate or restore run ID ----
+    target_run = getattr(args, "target", "simpler_grants")
     if args.run_id:
         run_id = args.run_id
         logger.info("Resuming run: %s", run_id)
     else:
-        ts     = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
-        run_id = f"conv-{ts}-{uuid.uuid4().hex[:6]}"
-        logger.info("Starting new run: %s", run_id)
+        run_id = _stable_run_id(args.feature_name, args.feature_root or "", target_run)
+        logger.info("Run ID (stable): %s", run_id)
+
+    # ---- Early-exit: already completed? ----
+    if not getattr(args, "force", False) and not args.run_id and _is_run_complete(run_id):
+        print_banner("Already Complete — Skipping")
+        print(f"  Run ID:  {run_id}")
+        print(f"  Feature: {args.feature_name}")
+        print()
+        print("  All steps were completed in a previous run.")
+        print("  Use --force to re-run from scratch.")
+        print()
+        return 0
 
     # ---- Step 0: Checkpoint / Resume ----
     checkpoint = CheckpointManager(
@@ -199,12 +262,14 @@ def run_pipeline(args: argparse.Namespace) -> int:
 
     # ---- Step 3: Plan Document Generation ----
     print_banner("Step 3: Plan Document Generation")
+    target_run = getattr(args, "target", "simpler_grants")
     plan_agent = PlanAgent(
         dependency_graph=dependency_graph,
         config=config,
         run_id=run_id,
         plans_dir=DEFAULT_PLANS_DIR,
         llm_router=llm_router,
+        target=target_run,
     )
     plan_md, plan_path = plan_agent.generate()
     logger.info("[OK] Plan document generated: %s", plan_path)
@@ -240,6 +305,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
     # ---- Step 5: Conversion Execution ----
     print_banner("Step 5: Conversion Execution")
 
+    target_local = getattr(args, "target", "simpler_grants")
+
     # Prepare the approved plan dict (enriched with step data for the agent)
     approved_plan = _build_approved_plan(
         dependency_graph=dependency_graph,
@@ -247,6 +314,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         run_id=run_id,
         feature_root=args.feature_root,
         output_root=args.output_root or str(DEFAULT_OUTPUT_DIR / args.feature_name),
+        target=target_local,
     )
 
     log_path = DEFAULT_LOGS_DIR / f"{run_id}-conversion-log.json"
@@ -277,6 +345,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         output_root=approved_plan["output_root"],
         dry_run=args.dry_run,
         llm_router=llm_router,
+        target=target_local,
     )
 
     summary = conv_agent.execute()
@@ -326,11 +395,19 @@ def _build_approved_plan(
     run_id: str,
     feature_root: str,
     output_root: str,
+    target: str = "simpler_grants",
 ) -> dict:
     """
     Build the structured plan dict that ConversionAgent consumes.
     In a full pipeline this comes from the parsed Plan Document.
     Here we derive it programmatically from the dependency graph.
+
+    Parameters
+    ----------
+    target : str
+        Which target stack to use for output path derivation.
+        'simpler_grants' uses the 'project_structure' key in skillset config;
+        'hrsa_pprs' uses the 'project_structure_hrsa_pprs' key.
     """
     steps = []
     phase_labels  = {"frontend": "C", "backend": "B", "database": "A"}
@@ -338,6 +415,9 @@ def _build_approved_plan(
 
     skillset       = config["skillset"]
     mappings_index = config.get("mappings_index", {})
+
+    # Select the correct project_structure block based on target
+    structure_key = "project_structure_hrsa_pprs" if target == "hrsa_pprs" else "project_structure"
 
     for node in dependency_graph.get("nodes", []):
         node_type = node.get("type", "frontend")
@@ -352,7 +432,7 @@ def _build_approved_plan(
 
         # Determine target file path
         source_rel = node["id"]
-        target_rel = _derive_target_path(node, mapping, skillset)
+        target_rel = _derive_target_path(node, mapping, skillset, structure_key=structure_key)
 
         # Determine applicable rules
         rule_ids = ["RULE-003"]
@@ -402,9 +482,22 @@ def _infer_mapping_id(pattern: str, node_type: str) -> str:
     return {"frontend": "MAP-001", "backend": "MAP-003", "database": "MAP-004"}.get(node_type, "MAP-001")
 
 
-def _derive_target_path(node: dict, mapping: dict, skillset: dict) -> str:
-    """Derive the target file path from the source node and skillset config."""
-    import re
+def _derive_target_path(
+    node: dict,
+    mapping: dict,
+    skillset: dict,
+    structure_key: str = "project_structure",
+) -> str:
+    """
+    Derive the target file path from the source node and skillset config.
+
+    Parameters
+    ----------
+    structure_key : str
+        Which key in the skillset dict to use for project structure paths.
+        'project_structure' for simpler-grants-gov,
+        'project_structure_hrsa_pprs' for HRSA-Simpler-PPRS.
+    """
     node_type = node.get("type", "frontend")
     exports   = node.get("exports", [])
     name      = exports[0] if exports else Path(node["id"]).stem
@@ -413,24 +506,27 @@ def _derive_target_path(node: dict, mapping: dict, skillset: dict) -> str:
         s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", s)
         return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
 
-    def to_kebab(s: str) -> str:
-        return to_snake(s).replace("_", "-")
-
-    target_struct = skillset.get("project_structure", {})
+    target_struct = skillset.get(structure_key, skillset.get("project_structure", {}))
     feature_name  = node.get("id", "").split("/")[0].lower()
 
     if node_type == "frontend":
-        comp_root = target_struct.get("frontend", {}).get("components_root", "frontend/src/components/{feature_name}/")
+        comp_root = target_struct.get("frontend", {}).get(
+            "components_root", "frontend/src/components/{feature_name}/"
+        )
         base = comp_root.replace("{feature_name}", feature_name)
         return f"{base}{name}.tsx"
 
     if node_type == "backend":
-        api_root = target_struct.get("backend", {}).get("api_root", "api/src/api/{feature_name}/")
+        api_root = target_struct.get("backend", {}).get(
+            "api_root", "api/src/api/{feature_name}/"
+        )
         base = api_root.replace("{feature_name}", to_snake(feature_name))
         return f"{base}{to_snake(name)}_routes.py"
 
     if node_type == "database":
-        svc_root = target_struct.get("backend", {}).get("services_root", "api/src/services/{feature_name}/")
+        svc_root = target_struct.get("backend", {}).get(
+            "services_root", "api/src/services/{feature_name}/"
+        )
         base = svc_root.replace("{feature_name}", to_snake(feature_name))
         return f"{base}{to_snake(name)}_service.py"
 
@@ -524,9 +620,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="[TESTING ONLY] Skip the human approval gate and auto-approve the plan.",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Force a fresh run even if a completed run already exists for this "
+            "feature+target combination. Without this flag, a completed run is "
+            "skipped (dependency graph, plan and conversion log are reused)."
+        ),
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable DEBUG-level logging.",
+    )
+    parser.add_argument(
+        "--target",
+        choices=["simpler_grants", "hrsa_pprs"],
+        default="simpler_grants",
+        help=(
+            "Target stack to migrate to: "
+            "'simpler_grants' = Next.js 15 / APIFlask / SQLAlchemy 2.0 (default), "
+            "'hrsa_pprs' = Next.js 16 / Flask 3.0 / psycopg2 raw SQL (HRSA-Simpler-PPRS)."
+        ),
     )
 
     # ---- LLM provider selection ----
@@ -629,11 +744,13 @@ def main() -> int:
     # Build router early so we can describe it in the startup banner
     llm_router = build_llm_router(args)
 
-    print_banner("AI Migration Tool v1.0")
+    print_banner("AI Migration Tool v1.1")
     print(f"  Feature:      {args.feature_name}")
     print(f"  Source:       {args.feature_root or '(resuming)'}")
     print(f"  Mode:         {args.mode}")
+    print(f"  Target:       {args.target}")
     print(f"  Dry-run:      {args.dry_run}")
+    print(f"  Force:        {args.force}")
     print(f"  LLM:          {_describe_router(llm_router)}")
     print(f"  Auto-approve: {args.auto_approve}")
     print()
@@ -656,13 +773,28 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
     import agents.conversion_agent as _ca
 
     # ---- Generate or restore run ID ----
+    target = getattr(args, "target", "simpler_grants")
     if args.run_id:
         run_id = args.run_id
         logger.info("Resuming run: %s", run_id)
     else:
-        ts     = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
-        run_id = f"conv-{ts}-{uuid.uuid4().hex[:6]}"
-        logger.info("Starting new run: %s", run_id)
+        run_id = _stable_run_id(args.feature_name, args.feature_root or "", target)
+        logger.info("Run ID (stable): %s", run_id)
+
+    # ---- Early-exit: already completed? ----
+    if not args.force and not args.run_id and _is_run_complete(run_id):
+        print_banner("Already Complete — Skipping")
+        print(f"  Run ID:    {run_id}")
+        print(f"  Feature:   {args.feature_name}")
+        print(f"  Target:    {target}")
+        print()
+        print("  All steps were completed in a previous run.")
+        print("  Artefacts (plan, dependency graph, conversion log) are unchanged.")
+        print()
+        print("  To force a fresh run:  python main.py ... --force")
+        print("  To view the plan:      check plans/ for this run_id")
+        print()
+        return 0
 
     # ---- Step 0: Checkpoint / Resume ----
     checkpoint = CheckpointManager(
@@ -718,6 +850,7 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         run_id=run_id,
         plans_dir=DEFAULT_PLANS_DIR,
         llm_router=llm_router,
+        target=target,
     )
     plan_md, plan_path = plan_agent.generate()
     logger.info("[OK] Plan document generated: %s", plan_path)
@@ -759,6 +892,7 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         run_id=run_id,
         feature_root=args.feature_root,
         output_root=args.output_root or str(DEFAULT_OUTPUT_DIR / args.feature_name),
+        target=target,
     )
 
     log_path = DEFAULT_LOGS_DIR / f"{run_id}-conversion-log.json"
@@ -788,6 +922,7 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         output_root=approved_plan["output_root"],
         dry_run=args.dry_run,
         llm_router=llm_router,
+        target=target,
     )
 
     summary = conv_agent.execute()

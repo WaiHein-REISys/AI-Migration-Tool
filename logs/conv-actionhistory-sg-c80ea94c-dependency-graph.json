@@ -1,7 +1,7 @@
 {
   "feature_name": "ActionHistory",
   "feature_root": "Y:\\Solution\\HRSA\\HAB-GPRSSubmission\\src\\GPRSSubmission.Web\\wwwroot\\gprs_app\\ActionHistory",
-  "analyzed_at": "2026-02-23T22:41:03.605141+00:00",
+  "analyzed_at": "2026-02-24T21:52:20.915688+00:00",
   "nodes": [
     {
       "id": "ActionHistory.component.ts",
@@ -227,5 +227,6 @@
       "message": "External platform library detected: 'pfm-re' (imported in ActionHistory.module.ts). No direct equivalent exists in the target stack.",
       "recommendation": "Review 'pfm-re' usage and decide: (a) find equivalent Next.js/Python package, (b) stub with a local implementation, or (c) exclude from scope. Cannot proceed until resolved."
     }
-  ]
+  ],
+  "source_hash": "8842cacb7582ce2c77bb3573daed7d6d6a4eaddb"
 }
