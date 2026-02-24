@@ -346,9 +346,9 @@ ai-migration-tool/
 
 | Role | `--target` | Path |
 |---|---|---|
-| Source (legacy) | *(all)* | `Y:\Solution\HRSA\HAB-GPRSSubmission` |
-| Target — simpler-grants-gov | `simpler_grants` | `Y:\Solution\HRSA\simpler-grants-gov` |
-| Target — HRSA-Simpler-PPRS | `hrsa_pprs` | `Y:\Solution\HRSA\HRSA-Simpler-PPRS` |
+| Source (legacy) | *(all)* | `HAB-GPRSSubmission` |
+| Target — simpler-grants-gov | `simpler_grants` | `simpler-grants-gov` |
+| Target — HRSA-Simpler-PPRS | `hrsa_pprs` | `HRSA-Simpler-PPRS` |
 
 ---
 
