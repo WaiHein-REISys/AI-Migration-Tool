@@ -7,9 +7,11 @@ non-interactively / agent-mode).
 
 Public functions
 ----------------
-  collect_answers(prefill)     Full wizard Q&A flow → answers dict
-  collect_source_info(prefill) Source-only Q&A
-  collect_target_info(prefill) Target-only Q&A
+  collect_answers(prefill)                    Full wizard Q&A flow → answers dict
+  collect_source_info(prefill)                Source-only Q&A
+  collect_target_info(prefill)                Target-only Q&A
+  collect_feature_selection(source_root, …)   Pick a feature folder from source
+  detect_feature_folders(source_root, …)      Scan source for feature directories
 """
 
 import re
@@ -54,6 +56,206 @@ def _yes_no(prompt: str, default: bool = True) -> bool:
 
 def _section(title: str) -> None:
     print(f"\n  [{title}]")
+
+
+# ---------------------------------------------------------------------------
+# Feature folder detection
+# ---------------------------------------------------------------------------
+
+# Directories that are never feature folders (build artefacts, tooling, assets)
+_EXCLUDED_DIRS: frozenset[str] = frozenset({
+    # Package managers / build outputs
+    "node_modules", "dist", "build", "out", ".next", ".nuxt",
+    # Version control
+    ".git", ".svn", ".hg",
+    # IDE / editor
+    ".vscode", ".idea",
+    # Python
+    "__pycache__", ".venv", "venv", "env", ".eggs",
+    # .NET build artefacts
+    "bin", "obj", "packages",
+    # Test / coverage
+    "coverage", "e2e", ".nyc_output",
+    # Static / design assets (not application logic)
+    "assets", "fonts", "images", "img", "icons",
+    # Common infrastructure / non-feature folders
+    "styles", "environments", "i18n", "locale", "locales",
+    "migrations", "fixtures", "static", "media",
+    "Properties", "Connected Services",
+})
+
+# File suffixes that immediately identify a directory as an Angular feature folder
+_ANGULAR_FEATURE_MARKERS: frozenset[str] = frozenset({
+    ".component.ts",
+    ".component.html",
+    ".component.spec.ts",
+    ".module.ts",
+    ".service.ts",
+    ".directive.ts",
+    ".guard.ts",
+    ".pipe.ts",
+})
+
+# Generic source-code extensions (used as fallback: ≥ 2 such files → feature folder)
+_SOURCE_EXTENSIONS: frozenset[str] = frozenset({
+    ".ts", ".tsx", ".js", ".jsx",
+    ".cs", ".py", ".java", ".go", ".rb",
+    ".vue", ".svelte",
+})
+
+
+def _is_feature_dir(path: Path) -> bool:
+    """Return True if *path* looks like a self-contained feature/component directory."""
+    try:
+        files = [f.name for f in path.iterdir() if f.is_file()]
+    except (PermissionError, OSError):
+        return False
+
+    # Angular/framework marker: any file ends with a framework-specific suffix
+    for fname in files:
+        for marker in _ANGULAR_FEATURE_MARKERS:
+            if fname.endswith(marker):
+                return True
+
+    # Generic fallback: at least 2 source-code files in the same directory
+    src_count = sum(
+        1 for f in files if Path(f).suffix.lower() in _SOURCE_EXTENSIONS
+    )
+    return src_count >= 2
+
+
+def detect_feature_folders(
+    source_root: "str | Path",
+    max_depth: int = 6,
+) -> list[Path]:
+    """
+    Recursively scan *source_root* and return directories that look like
+    feature folders — i.e. directories that contain Angular component/service
+    markers or at least two generic source-code files.
+
+    Directories listed in ``_EXCLUDED_DIRS`` and hidden directories (names
+    starting with ``.``) are skipped.  The scan stops recursing *into* a
+    directory once that directory is identified as a feature folder, so
+    nested sub-components are not returned as independent features.
+
+    Parameters
+    ----------
+    source_root : str | Path
+        Absolute path to the legacy source codebase root.
+    max_depth : int
+        Maximum traversal depth relative to *source_root*. Default 6.
+
+    Returns
+    -------
+    list[Path]
+        Detected feature folder paths, sorted alphabetically by folder name.
+    """
+    root = Path(source_root)
+    if not root.is_dir():
+        return []
+
+    found: list[Path] = []
+
+    def _scan(directory: Path, depth: int) -> None:
+        if depth > max_depth:
+            return
+        try:
+            subdirs = [
+                e for e in directory.iterdir()
+                if e.is_dir()
+                and e.name not in _EXCLUDED_DIRS
+                and not e.name.startswith(".")
+            ]
+        except (PermissionError, OSError):
+            return
+
+        for sub in subdirs:
+            if _is_feature_dir(sub):
+                found.append(sub)
+                # Don't recurse inside a feature folder — its sub-directories
+                # are internal implementation files, not independent features.
+            else:
+                _scan(sub, depth + 1)
+
+    _scan(root, 0)
+    return sorted(found, key=lambda p: p.name.lower())
+
+
+def collect_feature_selection(
+    source_root: "str | Path",
+    prefill: str | None = None,
+) -> tuple[str, str]:
+    """
+    Scan *source_root* for feature folders, present a numbered list to the
+    user, and return the chosen folder as ``(feature_path, feature_name)``.
+
+    The user may type a number to pick from the list, or type (or paste) any
+    absolute or source-root-relative path to override the auto-detected list.
+    If no feature folders are found automatically the user is prompted to
+    enter a path directly.
+
+    Parameters
+    ----------
+    source_root : str | Path
+        Root of the legacy source codebase.
+    prefill : str | None
+        Pre-selected feature path shown as the default prompt value.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(feature_path, feature_name)`` where *feature_path* is the
+        absolute path string and *feature_name* is the folder's base name.
+    """
+    root = Path(source_root)
+    _safe_print(f"\n  Scanning for feature folders under: {root}")
+    detected = detect_feature_folders(root)
+
+    if detected:
+        _safe_print(f"  Found {len(detected)} feature folder(s):\n")
+        for i, d in enumerate(detected, start=1):
+            try:
+                rel = d.relative_to(root)
+            except ValueError:
+                rel = d
+            _safe_print(f"    {i:>3}.  {rel}")
+        _safe_print("\n         (or type a custom path to override)")
+        print()
+    else:
+        _safe_print("  No feature folders detected automatically.")
+        print()
+
+    while True:
+        if detected:
+            prompt = f"Select feature [1-{len(detected)}] or type a path"
+        else:
+            prompt = "Path to feature folder (absolute, or relative to source root)"
+
+        raw = _safe_input(prompt, prefill or "")
+
+        # ---- Numeric selection from detected list ----
+        if raw.isdigit() and detected:
+            idx = int(raw)
+            if 1 <= idx <= len(detected):
+                chosen = detected[idx - 1]
+                _safe_print(f"  Selected: {chosen}")
+                return str(chosen), chosen.name
+            _safe_print(f"  (Choose 1–{len(detected)}, or type a full path)")
+            continue
+
+        # ---- Custom path (absolute or relative to source_root) ----
+        if raw:
+            p = Path(raw)
+            if not p.is_absolute():
+                p = root / raw
+            if p.is_dir():
+                _safe_print(f"  Selected: {p}")
+                return str(p), p.name
+            _safe_print(f"  (Path not found: {p})")
+            continue
+
+        # Empty input with no prefill → keep prompting
+        _safe_print("  (Enter a number from the list, or paste a folder path)")
 
 
 # ---------------------------------------------------------------------------

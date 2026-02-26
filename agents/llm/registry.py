@@ -165,6 +165,8 @@ class LLMRouter:
             config.max_tokens = args.llm_max_tokens
         if getattr(args, "llm_temperature", None):
             config.temperature = args.llm_temperature
+        if getattr(args, "llm_timeout", None) is not None:
+            config.timeout_seconds = int(args.llm_timeout)
 
         logger.info(
             "LLM configured from CLI: provider=%s model=%s base_url=%s",

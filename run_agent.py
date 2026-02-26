@@ -16,6 +16,9 @@ Usage:
     python run_agent.py --setup --config wizard.json    # wizard with pre-filled answers
     python run_agent.py --setup --dry-run               # preview wizard outputs
     python run_agent.py --setup --list-targets          # list configured targets
+    python run_agent.py --new-job                        # interactively create a job file
+    python run_agent.py --new-job --target hrsa_pprs    # pre-select migration target
+    python run_agent.py --new-job --feature ActionHistory  # pre-fill feature search
 
 From an AI agent (Cursor / Copilot / Windsurf chat):
     "Run the migration job at agent-prompts/migrate-action-history.yaml"
@@ -23,6 +26,7 @@ From an AI agent (Cursor / Copilot / Windsurf chat):
     "List available migration jobs with python run_agent.py --list-jobs"
     "Configure a new migration target with python run_agent.py --setup"
     "List configured targets with python run_agent.py --setup --list-targets"
+    "Create a new migration job with python run_agent.py --new-job"
 """
 
 import argparse
@@ -299,6 +303,205 @@ def _run_setup_wizard(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# New-job wizard
+# ---------------------------------------------------------------------------
+
+def _run_new_job(args) -> int:
+    """
+    Interactively create a new agent job YAML file by:
+      1. Reading the wizard registry to find registered source root(s) and targets.
+      2. Auto-scanning the source root for feature folders and letting the user
+         pick one (or type a custom path to override).
+      3. Letting the user select a migration target from the registered list.
+      4. Reading the target's template YAML (agent-prompts/_template_<id>.yaml)
+         and substituting the feature placeholders with the chosen values.
+      5. Writing the result to agent-prompts/migrate-<feature>-<target>.yaml.
+
+    CLI shortcuts
+    -------------
+    --target <id>       Pre-select a registered target (skip target prompt).
+    --feature <path>    Pre-fill the feature folder path / search filter.
+    """
+    import re as _re
+    from wizard.registry import load_registry
+    from wizard.collector import (
+        collect_feature_selection,
+        _safe_print as _col_print,
+        _safe_input as _col_input,
+        _yes_no,
+    )
+
+    registry = load_registry()
+    targets  = registry.get("targets", {})
+
+    if not targets:
+        print("[ERROR] No migration targets configured yet.", file=sys.stderr)
+        print(
+            "        Run:  python run_agent.py --setup  to configure a target first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # ------------------------------------------------------------------
+    # 1. Resolve source_root from registry
+    # ------------------------------------------------------------------
+    # Collect unique, non-placeholder source roots keyed by source_name.
+    source_entries: dict[str, str] = {}  # source_name → source_root
+    for tid, info in targets.items():
+        sname = info.get("source_name") or tid
+        sroot = info.get("source_root") or ""
+        if sroot and sroot not in ("<YOUR_SOURCE_ROOT>", ""):
+            source_entries[sname] = sroot
+
+    if not source_entries:
+        print("[ERROR] Source root path not found in wizard registry.", file=sys.stderr)
+        print(
+            "        Re-run:  python run_agent.py --setup  and enter your local source path.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if len(source_entries) == 1:
+        source_name, source_root = next(iter(source_entries.items()))
+    else:
+        entries_list = list(source_entries.items())
+        _col_print("\n  Registered source codebases:\n")
+        for i, (sname, sroot) in enumerate(entries_list, start=1):
+            _col_print(f"    {i:>3}.  {sname}  —  {sroot}")
+        print()
+        while True:
+            raw = _col_input(f"Select source [1-{len(entries_list)}]", "1")
+            if raw.isdigit():
+                idx = int(raw)
+                if 1 <= idx <= len(entries_list):
+                    source_name, source_root = entries_list[idx - 1]
+                    break
+            _col_print(f"  (Choose 1–{len(entries_list)})")
+
+    if not Path(source_root).is_dir():
+        print(f"[ERROR] Source root not found on disk: {source_root}", file=sys.stderr)
+        print(
+            "        Update config/wizard-registry.json with your local source_root path,\n"
+            "        or re-run the setup wizard.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # ------------------------------------------------------------------
+    # 2. Select feature folder (auto-scan + user choice or override)
+    # ------------------------------------------------------------------
+    prefill_feature = getattr(args, "feature", None) or ""
+    feature_path, feature_name = collect_feature_selection(
+        source_root, prefill=prefill_feature
+    )
+
+    # ------------------------------------------------------------------
+    # 3. Pick migration target
+    # ------------------------------------------------------------------
+    target_arg = getattr(args, "target", None)
+
+    if target_arg and target_arg in targets:
+        target_id = target_arg
+        _col_print(f"\n  Target: {target_id}")
+    elif len(targets) == 1:
+        target_id = next(iter(targets))
+        _col_print(f"\n  Using the only configured target: {target_id}")
+    else:
+        target_list = list(targets.items())
+        _col_print("\n  Configured migration targets:\n")
+        for i, (tid, info) in enumerate(target_list, start=1):
+            pair = info.get("framework_pair", "?")
+            _col_print(f"    {i:>3}.  {tid}  ({pair})")
+        print()
+        while True:
+            raw = _col_input(f"Select target [1-{len(target_list)}]", "1")
+            if raw.isdigit():
+                idx = int(raw)
+                if 1 <= idx <= len(target_list):
+                    target_id = target_list[idx - 1][0]
+                    break
+            _col_print(f"  (Choose 1–{len(target_list)})")
+
+    # ------------------------------------------------------------------
+    # 4. Determine output filename
+    # ------------------------------------------------------------------
+    safe_feature = feature_name.lower().replace(" ", "-").replace("_", "-")
+    default_filename = f"migrate-{safe_feature}-{target_id}.yaml"
+
+    _col_print(f"\n  Feature:  {feature_name}")
+    _col_print(f"  Path:     {feature_path}")
+    _col_print(f"  Target:   {target_id}")
+    _col_print(f"  Output:   agent-prompts/{default_filename}")
+    print()
+
+    out_raw  = _col_input("Output filename (in agent-prompts/)", default_filename)
+    out_path = ROOT / "agent-prompts" / out_raw
+
+    if out_path.exists():
+        _col_print(f"\n  [WARN] File already exists: {out_path.name}")
+        if not _yes_no("Overwrite?", default=False):
+            print("  Cancelled.")
+            return 0
+
+    # ------------------------------------------------------------------
+    # 5. Load template and substitute placeholders
+    # ------------------------------------------------------------------
+    template_path = ROOT / "agent-prompts" / f"_template_{target_id}.yaml"
+    if not template_path.exists():
+        print(f"[ERROR] Template not found: {template_path}", file=sys.stderr)
+        print(
+            "        Re-run the setup wizard to regenerate it:\n"
+            "          python run_agent.py --setup --overwrite",
+            file=sys.stderr,
+        )
+        return 1
+
+    content = template_path.read_text(encoding="utf-8")
+
+    # Replace the feature_root line (handles any placeholder or path in quotes)
+    content = _re.sub(
+        r'(feature_root:\s*)".+"',
+        f'feature_root: "{feature_path}"',
+        content,
+    )
+    # Replace the feature_name line
+    content = _re.sub(
+        r'(feature_name:\s*)".+"',
+        f'feature_name: "{feature_name}"',
+        content,
+    )
+    # Replace any remaining <FeatureName> tokens in comments / strings
+    content = content.replace("<FeatureName>", feature_name)
+
+    # Update the job.name line
+    content = _re.sub(
+        r'(name:\s*"Migrate ).*?(")',
+        f'\\g<1>{feature_name} -> {target_id}\\g<2>',
+        content,
+        count=1,
+    )
+
+    # ------------------------------------------------------------------
+    # 6. Write job file
+    # ------------------------------------------------------------------
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(content, encoding="utf-8")
+
+    _safe_print(f"\n  [OK] Job file created: {out_path}")
+    _safe_print("\n  Next steps:")
+    _safe_print(f"    1. Review:  {out_path}")
+    _safe_print(
+        f"    2. Run (plan mode, generates Plan Document — no code written):\n"
+        f"         python run_agent.py --job agent-prompts/{out_path.name}"
+    )
+    _safe_print(
+        "    3. After approving the plan, edit the job file → set  mode: full  and re-run."
+    )
+    print()
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -343,6 +546,41 @@ def main() -> int:
         help="Enable DEBUG-level logging.",
     )
 
+    # ---- New-job creation flags ----
+    parser.add_argument(
+        "--new-job",
+        action="store_true",
+        help=(
+            "Interactively create a new agent job YAML file. "
+            "Scans the registered source codebase for feature folders, "
+            "lets you pick one (or type a custom path), choose a migration "
+            "target, and writes the job file to agent-prompts/. "
+            "Requires the setup wizard to have been run at least once "
+            "(python run_agent.py --setup)."
+        ),
+    )
+    parser.add_argument(
+        "--feature",
+        type=str,
+        default=None,
+        metavar="PATH_OR_NAME",
+        help=(
+            "[--new-job only] Pre-fill the feature folder path or name. "
+            "Can be an absolute path, a path relative to the source root, "
+            "or a folder name used as a search hint."
+        ),
+    )
+    parser.add_argument(
+        "--target",
+        type=str,
+        default=None,
+        metavar="TARGET_ID",
+        help=(
+            "[--new-job only] Pre-select a registered migration target by its ID "
+            "(e.g. 'hrsa_pprs', 'modern'). Skip the interactive target prompt."
+        ),
+    )
+
     # ---- Setup Wizard flags ----
     parser.add_argument(
         "--setup",
@@ -383,6 +621,10 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+
+    # ---- New-job creation mode ----
+    if args.new_job:
+        return _run_new_job(args)
 
     # ---- Setup wizard mode ----
     if args.setup or args.list_targets:

@@ -70,7 +70,9 @@ class OllamaProvider(BaseLLMProvider):
         # Try official ollama package first
         try:
             import ollama  # type: ignore
-            self._client   = ollama.Client(host=host)
+            # Pass timeout so long code-generation requests don't time out (default 120s is often too short)
+            timeout = getattr(self.config, "timeout_seconds", 120)
+            self._client   = ollama.Client(host=host, timeout=timeout)
             self._use_sdk  = True
             logger.info(
                 "OllamaProvider ready (SDK): host=%s model=%s", host, model
