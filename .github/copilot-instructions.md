@@ -27,6 +27,8 @@ python run_agent.py --job agent-prompts/migrate-action-history.yaml
 | `--force` | Re-run even if already completed |
 | `--auto-approve` | Skip human approval gate (testing only) |
 | `--verbose` | Show DEBUG logs |
+| `--mode full` | Override `pipeline.mode` in YAML without editing the file |
+| `--json` | Output machine-readable JSON (useful for Copilot parsing) |
 
 ---
 
@@ -46,8 +48,85 @@ See `agent-prompts/example-wizard-config.json` for the JSON answer format.
 
 ---
 
+## Agent-interactive commands (GitHub Copilot / autonomous mode)
+
+For fully autonomous, non-interactive agent workflows:
+
+### Discover features in the source codebase
+```bash
+python run_agent.py --list-features --source <YOUR_SOURCE_ROOT>
+python run_agent.py --list-features --json
+```
+
+### Create a job file without prompts
+```bash
+python run_agent.py --new-job \
+  --feature ActionHistory \
+  --target snake_case \
+  --non-interactive --json
+```
+
+### Check migration status
+```bash
+python run_agent.py --status --job agent-prompts/migrate-actionhistory-snake_case.yaml --json
+```
+Returns: `plan_generated`, `plan_approved`, `completed_steps`, `pending_steps`, `blocked_steps`.
+
+### Approve a plan (agent-driven — no terminal interaction required)
+```bash
+python run_agent.py --approve-plan --job agent-prompts/migrate-actionhistory-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml --mode full
+```
+Writes `output/<feature>/.approved` marker; the pipeline detects it and skips the TTY prompt.
+
+### Revise a plan with LLM feedback
+```bash
+python run_agent.py --revise-plan \
+  --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --feedback "Flag all pfm-auth imports as BLOCKED. Add a dedicated DB migration section."
+```
+- Reuses cached dependency graph (no re-scoping needed)
+- Writes a `-rev.md` plan file
+- Removes the `.approved` marker so the revised plan requires re-approval
+
+### Typical 5-step autonomous workflow
+```bash
+# 1. Discover features
+python run_agent.py --list-features --json
+
+# 2. Create job (non-interactive)
+python run_agent.py --new-job --feature ActionHistory --target snake_case \
+                    --non-interactive --json
+
+# 3. Generate plan
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml
+
+# 4. Check status
+python run_agent.py --status --job agent-prompts/migrate-actionhistory-snake_case.yaml --json
+
+# 5a. Approve + convert
+python run_agent.py --approve-plan --job agent-prompts/migrate-actionhistory-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml --mode full
+
+# 5b. Or revise and re-approve
+python run_agent.py --revise-plan --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+                    --feedback "Add BLOCKED markers for pfm-auth imports."
+python run_agent.py --approve-plan --job agent-prompts/migrate-actionhistory-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml --mode full
+```
+
+---
+
 ## Creating a job for a new feature
 
+### Option A — Autonomous (agent mode)
+```bash
+python run_agent.py --new-job \
+  --feature MyFeature --target snake_case \
+  --non-interactive --json
+```
+
+### Option B — Manual template copy
 1. List configured targets: `python run_agent.py --setup --list-targets`
 2. If target not configured, run setup wizard first (see above)
 3. Copy the right template: `cp agent-prompts/_template_<target>.yaml agent-prompts/migrate-<FeatureName>.yaml`
@@ -61,7 +140,7 @@ pipeline:
   feature_root:  "<YOUR_SOURCE_ROOT>/src/.../FeatureName"
   feature_name:  "FeatureName"
   mode:          "plan"          # scope | plan | full
-  target:        "simpler_grants" # simpler_grants | hrsa_pprs
+  target:        "snake_case"    # simpler_grants | hrsa_pprs | snake_case | <custom>
   dry_run:       false
   auto_approve:  false
   force:         false
@@ -80,6 +159,8 @@ llm:
 |---|---|
 | `simpler_grants` | Next.js 15 / React 19 / APIFlask / SQLAlchemy 2.0 |
 | `hrsa_pprs` | Next.js 16 / React 18 / Flask 3.0 / psycopg2 raw SQL |
+| `snake_case` | Next.js / TypeScript / Flask 3.0 / snake_case naming |
+| `<custom>` | Configured via `python run_agent.py --setup` |
 
 ---
 
@@ -89,7 +170,7 @@ llm:
 1. Config Ingestion  → validates skillset-config.json + rules-config.json
 2. Scoping           → analyzes feature source files, produces dependency graph
 3. Plan Generation   → LLM generates structured Plan Document (Markdown)
-4. Human Approval    → human reviews plan and types "yes" to proceed
+4. Approval          → human types "yes" in terminal  OR  agent writes .approved marker
 5. Conversion        → LLM converts each file per the approved plan
 ```
 
@@ -127,14 +208,24 @@ export AI_AGENT_MODE=1    # bash/zsh
 
 ## Recommended workflow for migrating a new feature
 
+### Human-assisted
 1. Check configured targets: `python run_agent.py --setup --list-targets`
-2. If the target stack is not configured, run the setup wizard first:
-   `python run_agent.py --setup`
+2. If the target stack is not configured, run the setup wizard first
 3. Check for an existing job file: does `agent-prompts/migrate-<name>.yaml` exist?
 4. If not, copy the target's template: `cp agent-prompts/_template_<target>.yaml agent-prompts/migrate-<name>.yaml`
 5. Run in **plan mode first** — review the Plan Document before running `full`
 6. After the user approves the plan, run in `full` mode
 7. Check `logs/<run-id>-conversion-log.md` for step-by-step results
+
+### Autonomous (Copilot / agent)
+```bash
+python run_agent.py --list-features --json
+python run_agent.py --new-job --feature <Name> --target snake_case --non-interactive --json
+python run_agent.py --job agent-prompts/migrate-<name>-snake_case.yaml
+python run_agent.py --status --job agent-prompts/migrate-<name>-snake_case.yaml --json
+python run_agent.py --approve-plan --job agent-prompts/migrate-<name>-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-<name>-snake_case.yaml --mode full
+```
 
 ## Recommended workflow for setting up a new custom target
 

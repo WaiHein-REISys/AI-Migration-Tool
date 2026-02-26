@@ -1,0 +1,52 @@
+{
+  "_comment": "Example wizard config for non-interactive / agent mode setup.",
+  "_usage": "python setup_wizard.py --config agent-prompts/example-wizard-config.json --non-interactive",
+  "_note": "Copy this file, fill in your values, rename to wizard-<target_id>.json",
+
+  "target_id": "my_nextjs_flask",
+
+  "source": {
+    "name": "legacy_app",
+    "root": "C:/path/to/your/legacy/codebase",
+    "framework": "Angular 2",
+    "backend_framework": "ASP.NET Core 8",
+    "language": "TypeScript / C#",
+    "database": "SQL Server + Entity Framework Core"
+  },
+
+  "target": {
+    "name": "my_nextjs_flask",
+    "root": "C:/path/to/your/modern/codebase",
+    "framework": "Next.js 15",
+    "backend_framework": "Flask 3.0",
+    "language": "TypeScript / Python",
+    "database": "PostgreSQL + psycopg2",
+
+    "frontend_root": "frontend/src/",
+    "backend_root": "backend/",
+
+    "frontend_details": {
+      "components_dir": "components/",
+      "services_dir": "services/",
+      "component_structure": "ComponentName/ with ComponentName.tsx + ComponentName.module.css + index.ts",
+      "styling": "CSS Modules (*.module.css)",
+      "barrel_export": "index.ts per component folder",
+      "test_suffix": ".test.tsx"
+    },
+
+    "backend_details": {
+      "routes_dir": "routes/",
+      "services_dir": "services/",
+      "repositories_dir": "repositories/",
+      "route_file_pattern": "{feature_name}_routes.py",
+      "service_file_pattern": "{feature_name}_service.py",
+      "repository_file_pattern": "{feature_name}_repository.py",
+      "architecture": "Routes -> Services -> Repositories (3-layer)"
+    },
+
+    "database_details": {
+      "access_pattern": "psycopg2 raw SQL with RealDictCursor",
+      "migration_tool": "custom Python scripts"
+    }
+  }
+}

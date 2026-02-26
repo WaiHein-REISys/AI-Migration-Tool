@@ -1,0 +1,18 @@
+TARGET STACK: Next.js / Python Flask
+
+FRONTEND (Next.js / TypeScript):
+  - components_dir: components/
+  - services_dir: services/
+  - component_structure: ComponentName/ with ComponentName.tsx + ComponentName.module.css + index.ts
+  - test_suffix: .test.tsx
+  - styling: CSS Modules (*.module.css)
+  - barrel_export: index.ts per component folder
+
+BACKEND (Python Flask):
+  - routes_dir: routes/
+  - services_dir: services/
+  - route_file_pattern: {feature_name}_routes.py
+  - service_file_pattern: {feature_name}_service.py
+  - repositories_dir: repositories/
+  - repository_file_pattern: {feature_name}_repository.py
+  - architecture: Routes -> Services -> Repositories (3-layer)

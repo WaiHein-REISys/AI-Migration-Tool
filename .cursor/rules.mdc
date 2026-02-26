@@ -33,6 +33,8 @@ python run_agent.py --job agent-prompts/migrate-action-history.yaml
 --force         # Re-run even if the feature was already migrated
 --auto-approve  # Skip the human approval gate (testing only)
 --verbose       # Show DEBUG-level logs
+--mode full     # Override pipeline.mode without editing the YAML
+--json          # Machine-readable JSON output for agent parsing
 ```
 
 ### Examples
@@ -41,22 +43,111 @@ python run_agent.py --job agent-prompts/migrate-action-history.yaml
 python run_agent.py --job agent-prompts/migrate-action-history.yaml
 
 # Full pipeline — plan + code conversion
-# (set mode: "full" in the job file, or ask the user to confirm first)
-python run_agent.py --job agent-prompts/migrate-action-history.yaml --auto-approve
+python run_agent.py --job agent-prompts/migrate-action-history.yaml --mode full
+
+# Override mode at the CLI without editing YAML
+python run_agent.py --job agent-prompts/migrate-action-history.yaml --mode scope
 
 # Dry run to preview without writing files
 python run_agent.py --job agent-prompts/migrate-action-history.yaml --dry-run
+```
 
-# HRSA-Simpler-PPRS target stack
-python run_agent.py --job agent-prompts/migrate-action-history-hrsa.yaml
+---
+
+## Agent-interactive commands (Cursor / Windsurf / Copilot / AntiGravity)
+
+These commands enable fully autonomous, non-interactive agent-driven migration.
+
+### 1. Discover available features in the source codebase
+```bash
+python run_agent.py --list-features --source <YOUR_SOURCE_ROOT>
+python run_agent.py --list-features --json   # returns JSON list for agent parsing
+```
+
+### 2. Create a job file without human prompts
+```bash
+python run_agent.py --new-job \
+  --feature ActionHistory \
+  --target snake_case \
+  --non-interactive \
+  --json
+```
+`--feature` resolves as: absolute path → source-relative path → folder name auto-match
+against `detect_feature_folders()`.
+
+### 3. Generate the plan (no code written)
+```bash
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml
+```
+
+### 4. Check migration status
+```bash
+python run_agent.py --status --job agent-prompts/migrate-actionhistory-snake_case.yaml --json
+```
+Returns: `plan_generated`, `plan_approved`, `conversion_started`,
+`completed_steps`, `pending_steps`, `blocked_steps`, next-step advice.
+
+### 5a. Approve the plan and run conversion (no TTY required)
+```bash
+python run_agent.py --approve-plan \
+  --job agent-prompts/migrate-actionhistory-snake_case.yaml
+
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --mode full
+```
+`--approve-plan` writes `output/<feature>/.approved` — the pipeline detects it
+and auto-skips the interactive terminal prompt.
+
+### 5b. Revise the plan with LLM feedback (clears approval)
+```bash
+python run_agent.py --revise-plan \
+  --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --feedback "Add a DB migration section. Flag pfm-auth imports as BLOCKED."
+```
+- Reuses the cached dependency graph (`logs/{run_id}-dependency-graph.json`)
+- Writes a `-rev.md` revised plan file
+- Removes the `.approved` marker so the revised plan requires explicit re-approval
+- After revision: re-run `--approve-plan`, then `--mode full`
+
+### Full autonomous workflow example
+```bash
+# 1. Discover features
+python run_agent.py --list-features --json
+
+# 2. Create job (non-interactive)
+python run_agent.py --new-job --feature ActionHistory --target snake_case \
+                    --non-interactive --json
+
+# 3. Generate plan
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml
+
+# 4. Check status
+python run_agent.py --status \
+  --job agent-prompts/migrate-actionhistory-snake_case.yaml --json
+
+# 5a. Approve + convert
+python run_agent.py --approve-plan \
+  --job agent-prompts/migrate-actionhistory-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --mode full
+
+# 5b. Or: revise, re-approve, re-convert
+python run_agent.py --revise-plan \
+  --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --feedback "Flag pfm-auth imports. Expand data-access section."
+python run_agent.py --approve-plan \
+  --job agent-prompts/migrate-actionhistory-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --mode full
 ```
 
 ---
 
 ## Configuring a new migration target (first-time setup)
 
-If the user wants to migrate to a **new or custom stack** (not `simpler_grants`
-or `hrsa_pprs`), run the **Setup Wizard** to generate optimised prompts and config:
+If the user wants to migrate to a **new or custom stack** (not `simpler_grants`,
+`hrsa_pprs`, or `snake_case`), run the **Setup Wizard** to generate optimised prompts
+and config:
 
 ```bash
 # Interactive — walks you through source/target codebase questions
@@ -91,11 +182,19 @@ python run_agent.py --job agent-prompts/migrate-<FeatureName>.yaml
 
 ## Creating a new job file (for an existing target)
 
-To migrate a new feature to an already-configured target, copy the template and fill in:
+### Option A — Agent/non-interactive
+```bash
+python run_agent.py --new-job \
+  --feature MyFeature --target snake_case \
+  --non-interactive --json
+```
+
+### Option B — Manual
+Fill in:
 - `pipeline.feature_root` — absolute path to the legacy feature folder
 - `pipeline.feature_name` — human-readable name (used in filenames)
 - `pipeline.mode` — `plan` (recommended first run) or `full`
-- `pipeline.target` — target identifier (e.g. `simpler_grants`, `hrsa_pprs`, or custom)
+- `pipeline.target` — target identifier (e.g. `simpler_grants`, `hrsa_pprs`, `snake_case`)
 
 ```bash
 # Then run it
@@ -136,8 +235,9 @@ checkpoints/               # Run state for resume (output)
 3. **Never edit `config/skillset-config.json` or `config/rules-config.json`** unless the user explicitly asks.
 4. **Prompt files** under `prompts/` are safe to read and suggest edits for — they control LLM behaviour.
 5. **If the feature already has a completed run**, the pipeline will say "Already Complete — Skipping". Use `--force` to re-run.
-6. **Mode `plan` is the safe default** — it generates a Plan Document without writing any converted code. Always start with `plan` mode when migrating a new feature.
-7. **The human approval gate** in `full` mode requires a human to type `yes` in the terminal. Use `--auto-approve` only for testing.
+6. **Mode `plan` is the safe default** — generates a Plan Document without writing converted code. Always start here for new features.
+7. **Human approval gate**: in `full` mode, a human types `yes` OR use `--approve-plan` for agent-based approval (writes `.approved` marker).
+8. **Plan revision**: use `--revise-plan --feedback "..."` to regenerate with LLM feedback — automatically clears the `.approved` marker.
 
 ---
 
@@ -147,6 +247,8 @@ checkpoints/               # Run state for resume (output)
 |---|---|
 | `simpler_grants` | Next.js 15 / React 19 / APIFlask / SQLAlchemy 2.0 |
 | `hrsa_pprs` | Next.js 16 / React 18 / Flask 3.0 / psycopg2 raw SQL |
+| `snake_case` | Next.js / TypeScript / Flask 3.0 / snake_case naming |
+| `<custom>` | Configured via `python run_agent.py --setup` |
 
 ---
 
@@ -183,15 +285,25 @@ export AI_AGENT_MODE=1    # bash/zsh
 
 ## When asked to "migrate a feature"
 
+### Human-assisted mode
 1. Ask (or check): which feature folder and which target stack?
 2. Check configured targets: `python run_agent.py --setup --list-targets`
-3. If the target does not exist yet, run the setup wizard first:
-   `python run_agent.py --setup`
+3. If the target does not exist yet, run the setup wizard first
 4. Check if a job file already exists: `ls agent-prompts/migrate-<name>*.yaml`
 5. If not, copy the right template: `cp agent-prompts/_template_<target>.yaml agent-prompts/migrate-<name>.yaml`
 6. Run in plan mode first: `python run_agent.py --job agent-prompts/<file>.yaml`
 7. Show the user the generated plan path and ask them to review it
 8. Only run `full` mode after the user has reviewed and approved the plan
+
+### Autonomous agent mode (Cursor, Windsurf, Copilot, AntiGravity)
+```bash
+python run_agent.py --list-features --json
+python run_agent.py --new-job --feature <Name> --target snake_case --non-interactive --json
+python run_agent.py --job agent-prompts/migrate-<name>-snake_case.yaml
+python run_agent.py --status --job agent-prompts/migrate-<name>-snake_case.yaml --json
+python run_agent.py --approve-plan --job agent-prompts/migrate-<name>-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-<name>-snake_case.yaml --mode full
+```
 
 ## When asked to "configure a new target" or "set up migration for X to Y"
 

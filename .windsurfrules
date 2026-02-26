@@ -60,19 +60,77 @@ python run_agent.py --job agent-prompts/migrate-action-history.yaml
 --force         # Ignore the completed-run cache, re-run from scratch
 --auto-approve  # Skip human approval (for testing only)
 --verbose       # Show DEBUG-level log output
+--mode full     # Override pipeline.mode in the YAML (scope | plan | full)
+--json          # Machine-readable JSON output (for agent parsing)
 ```
+
+---
+
+## Agent-interactive commands (Cursor / Windsurf / Copilot / AntiGravity)
+
+These commands enable a fully autonomous, non-interactive agent workflow.
+
+### 1 — Discover available features
+```bash
+python run_agent.py --list-features --source <YOUR_SOURCE_ROOT>
+python run_agent.py --list-features --json   # JSON output for agent parsing
+```
+
+### 2 — Create a job file without any human prompts
+```bash
+python run_agent.py --new-job \
+  --feature ActionHistory \
+  --target snake_case \
+  --non-interactive \
+  --json
+```
+`--feature` resolves as: absolute path → source-relative path → folder name auto-match.
+
+### 3 — Generate the migration plan (no code written)
+```bash
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml
+```
+
+### 4 — Check migration status
+```bash
+python run_agent.py --status --job agent-prompts/migrate-actionhistory-snake_case.yaml
+python run_agent.py --status --job agent-prompts/migrate-actionhistory-snake_case.yaml --json
+```
+Returns: plan generated, plan approved, conversion steps completed/pending/blocked.
+
+### 5a — Approve the plan and run full conversion (agent-driven, no TTY needed)
+```bash
+python run_agent.py --approve-plan --job agent-prompts/migrate-actionhistory-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml --mode full
+```
+`--approve-plan` writes `output/<feature>/.approved` marker — the pipeline detects it
+and auto-skips the interactive TTY prompt.
+
+### 5b — Revise the plan with feedback (re-generates, clears approval marker)
+```bash
+python run_agent.py --revise-plan \
+  --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --feedback "Add migration notes for the data-access layer. Flag pfm-auth imports as BLOCKED."
+```
+Loads the existing dependency graph (no re-scoping). Writes a `-rev.md` plan file.
+Removes the `.approved` marker so the revised plan requires explicit re-approval.
 
 ---
 
 ## Creating a job for a new feature
 
 ```bash
+# Option A: Fully automated (agent mode)
+python run_agent.py --new-job \
+  --feature MyFeature --target snake_case \
+  --non-interactive --json
+
+# Option B: Manual template copy
 # 1. Check available targets (run setup wizard first if target not listed)
 python run_agent.py --setup --list-targets
 
 # 2. Copy the right template
 cp agent-prompts/_template_<target_id>.yaml agent-prompts/migrate-MyFeature.yaml
-# (for built-in targets: cp agent-prompts/_template.yaml ...)
 
 # 3. Edit the file — set at minimum:
 #    pipeline.feature_root  (absolute path to the legacy feature folder)
@@ -94,10 +152,10 @@ job:
   description: "What this migration does"
 
 pipeline:
-  feature_root:  "Y:/Solution/HRSA/HAB-GPRSSubmission/src/.../FeatureName"
+  feature_root:  "<YOUR_SOURCE_ROOT>/src/.../FeatureName"
   feature_name:  "FeatureName"
   mode:          "plan"           # scope | plan | full
-  target:        "simpler_grants" # simpler_grants | hrsa_pprs
+  target:        "snake_case"     # simpler_grants | hrsa_pprs | snake_case | <custom>
   dry_run:       false
   auto_approve:  false
   force:         false
@@ -129,7 +187,7 @@ notes: |
 | 1. Config Ingestion | `ConfigIngestionAgent` | Validated config dict |
 | 2. Scoping | `ScopingAgent` | `logs/<run-id>-dependency-graph.json` |
 | 3. Plan Generation | `PlanAgent` | `plans/<feature>-plan-<ts>.md` |
-| 4. Human Approval | `ApprovalGate` | CLI prompt — type `yes` to proceed |
+| 4. Human/Agent Approval | `ApprovalGate` | CLI `yes` OR `output/<feature>/.approved` marker |
 | 5. Conversion | `ConversionAgent` | `output/<feature>/` + `logs/<run-id>-conversion-log.*` |
 
 ---
@@ -140,6 +198,8 @@ notes: |
 |---|---|---|---|
 | `simpler_grants` | Next.js 15 / React 19 | APIFlask Blueprints | SQLAlchemy 2.0 `Mapped[]` |
 | `hrsa_pprs` | Next.js 16 / React 18 | Flask 3.0 Blueprints | psycopg2 raw SQL |
+| `snake_case` | Next.js / TypeScript | Flask 3.0 / snake_case naming | Custom SQL scripts |
+| `<custom>` | Wizard-configured | Wizard-configured | Wizard-configured |
 
 ---
 
@@ -180,7 +240,7 @@ export AI_AGENT_MODE=1    # bash/zsh
 
 ---
 
-## Recommended workflow
+## Recommended workflow (human-assisted)
 
 When a user asks to "migrate FeatureName":
 
@@ -191,8 +251,36 @@ When a user asks to "migrate FeatureName":
 5. Run plan mode: `python run_agent.py --job agent-prompts/migrate-featurename.yaml`
 6. Tell the user where the Plan Document was saved (`plans/`)
 7. Wait for the user to review and confirm before running `full` mode
-8. Run full mode: edit job file to `mode: full`, then re-run (or use `--auto-approve` for testing)
+8. Run full mode: `python run_agent.py --job ... --mode full`
 9. Check conversion results: `logs/<run-id>-conversion-log.md`
+
+## Recommended workflow (autonomous agent mode)
+
+When operating autonomously (Windsurf Cascade, Cursor, Copilot, AntiGravity):
+
+```bash
+# 1. Discover features
+python run_agent.py --list-features --json
+
+# 2. Create job file (non-interactive)
+python run_agent.py --new-job --feature ActionHistory --target snake_case \
+                    --non-interactive --json
+
+# 3. Generate plan
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml
+
+# 4. Check status
+python run_agent.py --status --job agent-prompts/migrate-actionhistory-snake_case.yaml --json
+
+# 5a. Approve + convert
+python run_agent.py --approve-plan --job agent-prompts/migrate-actionhistory-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml --mode full
+
+# 5b. Or revise with feedback
+python run_agent.py --revise-plan --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+                    --feedback "Flag all pfm-auth imports as BLOCKED."
+# Then re-approve and re-run
+```
 
 When a user asks to "configure a new migration target" or "set up migration to X":
 

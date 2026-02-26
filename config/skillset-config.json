@@ -278,5 +278,49 @@
       "service_file_pattern": "{feature_name}_service.py",
       "architecture": "Routes -> Services -> Repositories (3-layer)"
     }
+  },
+  "target_stack_snake_case": {
+    "frontend": {
+      "framework": "Next.js",
+      "language": "TypeScript",
+      "components_dir": "components/",
+      "services_dir": "services/",
+      "component_structure": "ComponentName/ with ComponentName.tsx + ComponentName.module.css + index.ts",
+      "test_suffix": ".test.tsx",
+      "styling": "CSS Modules (*.module.css)",
+      "barrel_export": "index.ts per component folder"
+    },
+    "backend": {
+      "framework": "Python Flask",
+      "routes_dir": "routes/",
+      "services_dir": "services/",
+      "route_file_pattern": "{feature_name}_routes.py",
+      "service_file_pattern": "{feature_name}_service.py",
+      "repositories_dir": "repositories/",
+      "repository_file_pattern": "{feature_name}_repository.py",
+      "architecture": "Routes -> Services -> Repositories (3-layer)"
+    },
+    "database": {
+      "engine": "Custom SQL scripts"
+    }
+  },
+  "project_structure_snake_case": {
+    "frontend": {
+      "components_root": "frontend/components/{feature_name}/",
+      "services_root": "frontend/services/",
+      "test_suffix": ".test.tsx",
+      "styling": "CSS Modules (*.module.css)",
+      "barrel_export": "index.ts per component folder",
+      "component_structure": "ComponentName/ with ComponentName.tsx + ComponentName.module.css + index.ts"
+    },
+    "backend": {
+      "api_root": "backend/routes/",
+      "services_root": "backend/services/",
+      "repositories_root": "backend/repositories/",
+      "repository_file_pattern": "{feature_name}_repository.py",
+      "route_file_pattern": "{feature_name}_routes.py",
+      "service_file_pattern": "{feature_name}_service.py",
+      "architecture": "Routes -> Services -> Repositories (3-layer)"
+    }
   }
 }
