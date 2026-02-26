@@ -12,7 +12,7 @@ job:
     target stack (Next.js 16 / React 18 / Flask 3.0 / psycopg2).
 
 pipeline:
-  feature_root: "Y:/Solution/HRSA/HAB-GPRSSubmission/src/GPRSSubmission.Web/wwwroot/gprs_app/ActionHistory"
+  feature_root: "<YOUR_SOURCE_ROOT>/src/GPRSSubmission.Web/wwwroot/gprs_app/ActionHistory"
   feature_name: "ActionHistory"
   mode: "full"
   target: "hrsa_pprs"

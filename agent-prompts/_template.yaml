@@ -13,8 +13,12 @@ job:
     Short description of what this migration job does.
 
 pipeline:
-  # REQUIRED — absolute path to the legacy feature folder
-  feature_root: "Y:/Solution/HRSA/HAB-GPRSSubmission/src/GPRSSubmission.Web/wwwroot/gprs_app/<FeatureName>"
+  # REQUIRED — absolute path to the legacy feature folder.
+  # Replace with your actual source codebase path. Examples:
+  #   Windows:    "C:/Projects/MyLegacyApp/src/features/<FeatureName>"
+  #   macOS/Linux: "/home/user/projects/my-legacy-app/src/features/<FeatureName>"
+  # Tip: run the setup wizard to auto-detect paths — python run_agent.py --setup
+  feature_root: "<YOUR_SOURCE_ROOT>/src/<FeatureName>"
 
   # REQUIRED — human-readable name (used in filenames and logs)
   feature_name: "<FeatureName>"

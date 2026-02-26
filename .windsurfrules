@@ -8,9 +8,12 @@
 This is the **AI Migration Tool** — a multi-agent pipeline that migrates
 `HAB-GPRSSubmission` (Angular 2 / ASP.NET Core) to a modern target stack.
 
-Source repo:  Y:/Solution/HRSA/HAB-GPRSSubmission
-Target (A):   Y:/Solution/HRSA/simpler-grants-gov   (Next.js 15 / APIFlask / SQLAlchemy)
-Target (B):   Y:/Solution/HRSA/HRSA-Simpler-PPRS    (Next.js 16 / Flask 3.0 / psycopg2)
+Source repo:  <YOUR_SOURCE_ROOT>   (HAB-GPRSSubmission — Angular 2 / ASP.NET Core)
+Target (A):   <YOUR_TARGET_ROOT_A>  (Next.js 15 / APIFlask / SQLAlchemy)
+Target (B):   <YOUR_TARGET_ROOT_B>  (Next.js 16 / Flask 3.0 / psycopg2)
+
+Paths are machine-specific. Run the setup wizard to register your local paths:
+  python run_agent.py --setup
 
 ---
 

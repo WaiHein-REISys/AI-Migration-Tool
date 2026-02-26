@@ -124,6 +124,7 @@ class ConversionAgent:
     _PROMPT_FILES: dict[str, tuple[str, str]] = {
         "simpler_grants": ("conversion_system.txt",           "conversion_target_stack.txt"),
         "hrsa_pprs":      ("conversion_system_hrsa_pprs.txt", "conversion_target_stack_hrsa_pprs.txt"),
+        "modern":         ("conversion_system_modern.txt",     "conversion_target_stack_modern.txt"),
     }
 
     def __init__(

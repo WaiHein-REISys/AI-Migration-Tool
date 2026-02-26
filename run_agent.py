@@ -195,6 +195,7 @@ def _job_to_args(job: dict, overrides: dict | None = None) -> argparse.Namespace
         ollama_host     = _get(llm, "ollama_host"),
         llm_max_tokens  = _get(llm, "max_tokens"),
         llm_temperature = _get(llm, "temperature"),
+        llm_timeout     = _get(llm, "timeout"),
     )
 
     # Default feature_name from feature_root stem if not set

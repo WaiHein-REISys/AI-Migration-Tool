@@ -229,11 +229,11 @@
     }
   },
   "reference_codebases": {
-    "source": "Y:/Solution/HRSA/HAB-GPRSSubmission",
-    "target_simpler_grants": "Y:/Solution/HRSA/simpler-grants-gov",
-    "target_hrsa_pprs": "Y:/Solution/HRSA/HRSA-Simpler-PPRS",
-    "source_gprs": "Y:\\Solution\\HRSA\\HAB-GPRSSubmission",
-    "modern": "Y:\\Solution\\HRSA\\HRSA-Simpler-PPRS"
+    "source": "<YOUR_SOURCE_ROOT>",
+    "target_simpler_grants": "<YOUR_TARGET_ROOT_SIMPLER_GRANTS>",
+    "target_hrsa_pprs": "<YOUR_TARGET_ROOT_HRSA_PPRS>",
+    "source_gprs": "<YOUR_SOURCE_ROOT>",
+    "modern": "<YOUR_TARGET_ROOT>"
   },
   "target_stack_modern": {
     "frontend": {

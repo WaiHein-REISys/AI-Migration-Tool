@@ -18,7 +18,7 @@ job:
 
 pipeline:
   # REQUIRED -- absolute path to the legacy feature folder
-  feature_root: "Y:/Solution/HRSA/HAB-GPRSSubmission/src/GPRSSubmission.Web/wwwroot/gprs_app/ActionHistory"
+  feature_root: "<YOUR_SOURCE_ROOT>/src/GPRSSubmission.Web/wwwroot/gprs_app/ActionHistory"
 
   # REQUIRED -- human-readable name (used in filenames and logs)
   feature_name: "ActionHistory"
@@ -42,27 +42,29 @@ pipeline:
   force: false
 
 llm:
-  # null = auto-detect from environment variables
-  provider: null   # anthropic | openai | openai_compat | ollama | llamacpp
+  # Use local Ollama (ensure Ollama is running: https://ollama.ai)
+  provider: ollama   # anthropic | openai | openai_compat | ollama | llamacpp
 
-  # null = provider default (claude-opus-4-5 / gpt-4o / llama3.2)
-  model: null
+  # Ollama model name (e.g. llama3.2, deepseek-coder, qwen2.5-coder, codellama)
+  model: "llama3.2"
 
   # true = template-only mode, no API key required
   no_llm: false
 
-  # Optional -- only set if needed
+  # Ollama server URL (default if null: http://localhost:11434)
   base_url: null
   model_path: null
-  ollama_host: null
+  ollama_host: "http://localhost:11434"
+  # Timeout in seconds for each LLM request (code generation can take 3–5+ min; 120 default often times out)
+  timeout: 600
   max_tokens: null
   temperature: null
 
 notes: |
   Source:  Angular 2 / ASP.NET Core MVC
-           Root: Y:\Solution\HRSA\HAB-GPRSSubmission
+           Root: <YOUR_SOURCE_ROOT>
   Target:  Next.js / Python Flask
-           Root: Y:\Solution\HRSA\HRSA-Simpler-PPRS
+           Root: <YOUR_TARGET_ROOT>
 
   Add any context the agent or human reviewer should know:
   - Business domain of this feature

@@ -17,8 +17,12 @@ job:
     Next.js / Python Flask.
 
 pipeline:
-  # REQUIRED -- absolute path to the legacy feature folder
-  feature_root: "Y:\Solution\HRSA\HAB-GPRSSubmission/src/<FeatureName>"
+  # REQUIRED -- absolute path to the legacy feature folder.
+  # Replace with your actual source codebase path. Examples:
+  #   Windows:     "C:/Projects/MyLegacyApp/src/<FeatureName>"
+  #   macOS/Linux: "/home/user/projects/my-legacy-app/src/<FeatureName>"
+  # Tip: run the setup wizard to auto-detect paths -- python run_agent.py --setup
+  feature_root: "<YOUR_SOURCE_ROOT>/src/<FeatureName>"
 
   # REQUIRED -- human-readable name (used in filenames and logs)
   feature_name: "<FeatureName>"
@@ -60,9 +64,9 @@ llm:
 
 notes: |
   Source:  Angular 2 / ASP.NET Core MVC
-           Root: Y:\Solution\HRSA\HAB-GPRSSubmission
+           Root: <YOUR_SOURCE_ROOT>
   Target:  Next.js / Python Flask
-           Root: Y:\Solution\HRSA\HRSA-Simpler-PPRS
+           Root: <YOUR_TARGET_ROOT>
 
   Add any context the agent or human reviewer should know:
   - Business domain of this feature

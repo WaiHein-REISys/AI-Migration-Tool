@@ -201,7 +201,13 @@ def generate_job_template(answers: dict) -> str:
     target    = answers["target"]
     target_id = answers["target_id"]
     source_path = source.get("root", "")
+    target_path = target.get("root", "")
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Use clear placeholders when actual paths are not provided so that wizard-
+    # generated template files are safe to commit without leaking local paths.
+    source_root_display = source_path or "<YOUR_SOURCE_ROOT>"
+    target_root_display = target_path or "<YOUR_TARGET_ROOT>"
 
     # Suggest a feature-folder hint based on detected sub-folders
     feature_hint = "<FeatureName>"
@@ -236,8 +242,11 @@ def generate_job_template(answers: dict) -> str:
             {target['framework']} / {target['backend_framework']}.
 
         pipeline:
-          # REQUIRED -- absolute path to the legacy feature folder
-          feature_root: "{source_path}/{feature_hint}"
+          # REQUIRED -- absolute path to the legacy feature folder.
+          # Replace <YOUR_SOURCE_ROOT> with your local source codebase path. Examples:
+          #   Windows:     "C:/Projects/MyLegacyApp/{feature_hint}"
+          #   macOS/Linux: "/home/user/projects/my-legacy-app/{feature_hint}"
+          feature_root: "{source_root_display}/{feature_hint}"
 
           # REQUIRED -- human-readable name (used in filenames and logs)
           feature_name: "<FeatureName>"
@@ -279,9 +288,9 @@ def generate_job_template(answers: dict) -> str:
 
         notes: |
           Source:  {source['framework']} / {source['backend_framework']}
-                   Root: {source_path}
+                   Root: {source_root_display}
           Target:  {target['framework']} / {target['backend_framework']}
-                   Root: {target.get('root', '(not set)')}
+                   Root: {target_root_display}
 
           Add any context the agent or human reviewer should know:
           - Business domain of this feature

@@ -12,10 +12,10 @@ Usage:
 
 Examples:
     # Analyse a feature and generate a plan (no code written)
-    python main.py --feature-root "Y:/Solution/HRSA/HAB-GPRSSubmission/src/GPRSSubmission.Web/wwwroot/gprs_app/ActionHistory" --feature-name "ActionHistory" --mode plan
+    python main.py --feature-root "/path/to/source/src/ActionHistory" --feature-name "ActionHistory" --mode plan
 
     # Full pipeline with CLI approval gate
-    python main.py --feature-root "Y:/Solution/HRSA/HAB-GPRSSubmission/src/GPRSSubmission.Web/wwwroot/gprs_app/ActionHistory" --feature-name "ActionHistory" --mode full
+    python main.py --feature-root "/path/to/source/src/ActionHistory" --feature-name "ActionHistory" --mode full
 
     # Full pipeline with a local Ollama model
     python main.py --feature-root "..." --feature-name "ActionHistory" --mode full --llm-provider ollama --llm-model llama3.2
@@ -720,6 +720,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="T",
         help="Sampling temperature for the LLM (default: 0.2).",
+    )
+    llm_group.add_argument(
+        "--llm-timeout",
+        type=int,
+        default=None,
+        metavar="SECONDS",
+        help="Timeout in seconds per LLM request (default: 120). Increase for Ollama code generation (e.g. 300–600).",
     )
 
     return parser

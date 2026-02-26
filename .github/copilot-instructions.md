@@ -58,7 +58,7 @@ See `agent-prompts/example-wizard-config.json` for the JSON answer format.
 
 ```yaml
 pipeline:
-  feature_root:  "Y:/Solution/HRSA/HAB-GPRSSubmission/src/.../FeatureName"
+  feature_root:  "<YOUR_SOURCE_ROOT>/src/.../FeatureName"
   feature_name:  "FeatureName"
   mode:          "plan"          # scope | plan | full
   target:        "simpler_grants" # simpler_grants | hrsa_pprs
