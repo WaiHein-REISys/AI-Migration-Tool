@@ -99,7 +99,7 @@ class ApprovalGate:
         print(preview)
 
         print(f"\n{separator}")
-        print("⚠️  No code has been written yet.")
+        print("[!] No code has been written yet.")
         print("   The Conversion Agent will only start after your approval.")
         print(separator)
 
@@ -118,7 +118,7 @@ class ApprovalGate:
                 continue
 
             if answer in self.VALID_APPROVE:
-                print("\n✅ Plan APPROVED. Starting conversion execution...\n")
+                print("\n[OK] Plan APPROVED. Starting conversion execution...\n")
                 return True
 
             if answer in self.VALID_REJECT:

@@ -108,22 +108,40 @@ class PlanAgent:
         plans_dir: str | Path = "plans",
         llm_router: "LLMRouter | None" = None,
         target: str = "simpler_grants",
+        revision_notes: str | None = None,
+        original_plan: str | None = None,
     ) -> None:
-        self.graph      = dependency_graph
-        self.config     = config
-        self.run_id     = run_id
-        self.plans_dir  = Path(plans_dir)
-        self._router    = llm_router
-        self.target     = target
+        """
+        Parameters
+        ----------
+        revision_notes : str | None
+            When set, the agent is running in *revision mode*.  The notes are
+            injected into the LLM user message so the model can address specific
+            feedback without losing the original plan structure.  A new plan file
+            (with ``-rev-`` in the filename) is always written — the dedup check
+            is skipped in this mode.
+        original_plan : str | None
+            Content of the previous plan, forwarded to the LLM for context when
+            ``revision_notes`` is provided.
+        """
+        self.graph           = dependency_graph
+        self.config          = config
+        self.run_id          = run_id
+        self.plans_dir       = Path(plans_dir)
+        self._router         = llm_router
+        self.target          = target
+        self.revision_notes  = revision_notes
+        self.original_plan   = original_plan
 
         # Resolve system prompt filename; fall back gracefully for unknown targets
         self._system_prompt_file = self._SYSTEM_PROMPT_FILES.get(
             target, self._SYSTEM_PROMPT_FILES["simpler_grants"]
         )
         logger.debug(
-            "PlanAgent initialised: target=%s, system_prompt=%s",
+            "PlanAgent initialised: target=%s, system_prompt=%s, revision=%s",
             target,
             self._system_prompt_file,
+            bool(revision_notes),
         )
 
     # ------------------------------------------------------------------
@@ -134,33 +152,48 @@ class PlanAgent:
         """
         Generate the Plan Document.
 
+        Normal mode
+        -----------
         If a plan file already exists for this run_id (stable/deterministic),
         the existing file is returned immediately without calling the LLM or
         rebuilding from template -- avoiding duplicate artefacts on re-runs.
+
+        Revision mode (``revision_notes`` set)
+        ---------------------------------------
+        The dedup check is skipped and a new plan file is always written with
+        ``-rev-`` in the filename.  The revision notes and the original plan
+        content (if provided) are forwarded to the LLM for context.
 
         Returns:
             (plan_markdown_str, plan_file_path)
         """
         feature_name = self.graph.get("feature_name", "unknown-feature")
 
-        # -- Dedup check: return existing plan if one was already saved --
-        slug     = re.sub(r"[^\w-]", "-", feature_name.lower())
-        existing = sorted(
-            self.plans_dir.glob(f"{slug}-plan-*-{self.run_id[:8]}*.md"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        ) if self.plans_dir.exists() else []
+        # -- Dedup check: skip when running in revision mode --
+        if not self.revision_notes:
+            slug     = re.sub(r"[^\w-]", "-", feature_name.lower())
+            existing = sorted(
+                self.plans_dir.glob(f"{slug}-plan-*-{self.run_id[:8]}*.md"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            ) if self.plans_dir.exists() else []
 
-        if existing:
-            plan_path = existing[0]
-            plan_md   = plan_path.read_text(encoding="utf-8")
+            if existing:
+                plan_path = existing[0]
+                plan_md   = plan_path.read_text(encoding="utf-8")
+                logger.info(
+                    "Plan already exists for run_id=%s — reusing: %s",
+                    self.run_id, plan_path,
+                )
+                return plan_md, plan_path
+
+        if self.revision_notes:
             logger.info(
-                "Plan already exists for run_id=%s — reusing: %s",
-                self.run_id, plan_path,
+                "Generating REVISED plan document for feature: %s (revision notes: %.80s…)",
+                feature_name, self.revision_notes,
             )
-            return plan_md, plan_path
-
-        logger.info("Generating plan document for feature: %s", feature_name)
+        else:
+            logger.info("Generating plan document for feature: %s", feature_name)
 
         if self._router is not None and self._router.is_available:
             plan_md = self._generate_with_llm(feature_name)
@@ -188,11 +221,17 @@ class PlanAgent:
     # ------------------------------------------------------------------
 
     def _generate_with_llm(self, feature_name: str) -> str:
-        """Call the configured LLM provider to generate the Plan Document."""
+        """Call the configured LLM provider to generate (or revise) the Plan Document."""
         from agents.llm import LLMMessage, LLMNotAvailableError, LLMProviderError
 
+        base_request = (
+            "Generate the Plan Document for the feature: '{name}'."
+            if not self.revision_notes
+            else "REVISE the Plan Document for the feature: '{name}' based on the feedback below."
+        ).format(name=feature_name)
+
         user_message = (
-            f"Generate the Plan Document for the feature: '{feature_name}'.\n\n"
+            f"{base_request}\n\n"
             f"DEPENDENCY GRAPH:\n```json\n{json.dumps(self.graph, indent=2)}\n```\n\n"
             f"SKILLSET CONFIG (component_mappings):\n```json\n"
             f"{json.dumps(self.config['skillset'].get('component_mappings', []), indent=2)}\n```\n\n"
@@ -201,6 +240,19 @@ class PlanAgent:
             f"Use the exact Markdown schema from your instructions. "
             f"Flag all pfm-* and Platform.* imports as BLOCKED."
         )
+
+        # -- Revision mode: append feedback and original plan --
+        if self.revision_notes:
+            user_message += (
+                f"\n\n---\n"
+                f"REVISION FEEDBACK (address ALL points before finalising):\n"
+                f"{self.revision_notes}\n"
+            )
+            if self.original_plan:
+                user_message += (
+                    f"\n\nORIGINAL PLAN (revise this — do NOT copy unchanged sections verbatim):\n"
+                    f"```markdown\n{self.original_plan}\n```\n"
+                )
 
         try:
             response = self._router.complete(
@@ -432,10 +484,17 @@ class PlanAgent:
     def _save_plan(self, content: str, feature_name: str) -> Path:
         self.plans_dir.mkdir(parents=True, exist_ok=True)
 
-        # Check whether a plan for this exact run_id was already written.
-        # run_id is now stable/deterministic, so re-running the same feature+target
-        # should reuse the existing plan rather than creating a duplicate.
         slug = re.sub(r"[^\w-]", "-", feature_name.lower())
+        ts   = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+        if self.revision_notes:
+            # Revision: always write a new file with -rev- marker so the
+            # original plan is preserved and diffs are easily visible.
+            path = self.plans_dir / f"{slug}-plan-{ts}-{self.run_id[:8]}-rev.md"
+            path.write_text(content, encoding="utf-8")
+            return path
+
+        # Normal mode: skip duplicate writes for the same run_id
         existing = sorted(
             self.plans_dir.glob(f"{slug}-plan-*-{self.run_id[:8]}*.md"),
             key=lambda p: p.stat().st_mtime,
@@ -448,7 +507,6 @@ class PlanAgent:
             )
             return existing[0]
 
-        ts   = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         path = self.plans_dir / f"{slug}-plan-{ts}-{self.run_id[:8]}.md"
         path.write_text(content, encoding="utf-8")
         return path
