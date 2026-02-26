@@ -1,0 +1,40 @@
+# ============================================================
+# AI Migration Tool — Agent Job File
+# ============================================================
+# Same feature as migrate-action-history.yaml but targeting
+# the HRSA-Simpler-PPRS stack (Flask 3.0 / psycopg2 raw SQL).
+# ============================================================
+
+job:
+  name: "Migrate ActionHistory → HRSA-Simpler-PPRS"
+  description: >
+    Migrate the ActionHistory Angular 2 feature to the HRSA-Simpler-PPRS
+    target stack (Next.js 16 / React 18 / Flask 3.0 / psycopg2).
+
+pipeline:
+  feature_root: "Y:/Solution/HRSA/HAB-GPRSSubmission/src/GPRSSubmission.Web/wwwroot/gprs_app/ActionHistory"
+  feature_name: "ActionHistory"
+  mode: "full"
+  target: "hrsa_pprs"
+  output_root: null
+  dry_run: false
+  auto_approve: false
+  force: false
+
+llm:
+  provider: null
+  model: null
+  no_llm: true
+  base_url: null
+  model_path: null
+  ollama_host: null
+  max_tokens: null
+  temperature: null
+
+notes: |
+  Same ActionHistory feature, but the target stack is HRSA-Simpler-PPRS.
+  Key differences vs simpler_grants:
+    - Backend uses Flask Blueprint + psycopg2 (no ORM) instead of APIFlask + SQLAlchemy
+    - Frontend components go in frontend/app/components/pages/<feature>/
+    - CSS Modules used instead of global class names (styles.className pattern)
+    - Repository layer pattern: backend/repositories/<feature>_repository.py

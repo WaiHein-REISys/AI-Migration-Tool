@@ -1,0 +1,62 @@
+# ============================================================
+# AI Migration Tool — Job File Template
+# ============================================================
+# Copy this file, fill in your values, then run:
+#   python run_agent.py --job agent-prompts/your-job.yaml
+#
+# Naming convention: migrate-<FeatureName>[-<target>].yaml
+# ============================================================
+
+job:
+  name: "Migrate <FeatureName>"
+  description: >
+    Short description of what this migration job does.
+
+pipeline:
+  # REQUIRED — absolute path to the legacy feature folder
+  feature_root: "Y:/Solution/HRSA/HAB-GPRSSubmission/src/GPRSSubmission.Web/wwwroot/gprs_app/<FeatureName>"
+
+  # REQUIRED — human-readable name (used in filenames and logs)
+  feature_name: "<FeatureName>"
+
+  # Pipeline mode: scope | plan | full
+  mode: "plan"
+
+  # Target stack: simpler_grants | hrsa_pprs
+  target: "simpler_grants"
+
+  # Output directory (null = default output/<feature_name>/)
+  output_root: null
+
+  # true = no files written, logs only
+  dry_run: false
+
+  # true = skip human approval (TESTING ONLY)
+  auto_approve: false
+
+  # true = ignore completed-run cache, re-run from scratch
+  force: false
+
+llm:
+  # null = auto-detect from environment variables
+  provider: null   # anthropic | openai | openai_compat | ollama | llamacpp
+
+  # null = provider default (claude-opus-4-5 / gpt-4o / llama3.2)
+  model: null
+
+  # true = template-only mode, no API key required
+  no_llm: false
+
+  # Optional — only set if needed
+  base_url: null
+  model_path: null
+  ollama_host: null
+  max_tokens: null
+  temperature: null
+
+notes: |
+  Add any context the agent or human reviewer should know:
+  - Business domain of this feature
+  - Known platform library dependencies (pfm-*, Platform.*)
+  - Cross-feature imports that need human review
+  - Expected output files

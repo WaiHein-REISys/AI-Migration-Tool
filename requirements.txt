@@ -42,6 +42,7 @@ anthropic>=0.40.0
 
 # ---- Utilities ----------------------------------------------------------
 python-dateutil>=2.9.0      # Date/time utilities
+PyYAML>=6.0.1               # YAML parser for agent-mode job files (run_agent.py)
 
 # ---- Development / Testing ----------------------------------------------
 pytest>=8.0.0

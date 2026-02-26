@@ -1,0 +1,200 @@
+# AI Migration Tool — Windsurf Agent Rules
+# =========================================
+# Windsurf reads this file to understand how to interact with this project.
+# These rules apply to all Cascade AI interactions in this workspace.
+
+## Project overview
+
+This is the **AI Migration Tool** — a multi-agent pipeline that migrates
+`HAB-GPRSSubmission` (Angular 2 / ASP.NET Core) to a modern target stack.
+
+Source repo:  Y:/Solution/HRSA/HAB-GPRSSubmission
+Target (A):   Y:/Solution/HRSA/simpler-grants-gov   (Next.js 15 / APIFlask / SQLAlchemy)
+Target (B):   Y:/Solution/HRSA/HRSA-Simpler-PPRS    (Next.js 16 / Flask 3.0 / psycopg2)
+
+---
+
+## First-run: Configuring a new migration target
+
+If migrating to a **new/custom stack** not already registered, run the **Setup Wizard**
+before creating job files. The wizard analyses your codebases and generates custom prompts.
+
+```bash
+python run_agent.py --setup                          # interactive
+python run_agent.py --setup --config wizard.json    # pre-filled JSON
+python run_agent.py --setup --dry-run               # preview only
+python run_agent.py --setup --list-targets          # list configured targets
+```
+
+See `agent-prompts/example-wizard-config.json` for the JSON format.
+
+After setup:
+- Custom prompts land in `prompts/plan_system_<id>.txt` etc.
+- Job template is at `agent-prompts/_template_<id>.yaml`
+- Registry is updated at `config/wizard-registry.json`
+
+---
+
+## How to run a migration
+
+**Always use `run_agent.py` — never invoke `main.py` directly.**
+
+Migration jobs are self-contained YAML files in `agent-prompts/`.
+
+### List available jobs
+```bash
+python run_agent.py --list-jobs
+```
+
+### Run a job
+```bash
+python run_agent.py --job agent-prompts/migrate-action-history.yaml
+```
+
+### Override flags (can append to any command)
+```bash
+--dry-run       # Preview only — no files written to disk
+--force         # Ignore the completed-run cache, re-run from scratch
+--auto-approve  # Skip human approval (for testing only)
+--verbose       # Show DEBUG-level log output
+```
+
+---
+
+## Creating a job for a new feature
+
+```bash
+# 1. Check available targets (run setup wizard first if target not listed)
+python run_agent.py --setup --list-targets
+
+# 2. Copy the right template
+cp agent-prompts/_template_<target_id>.yaml agent-prompts/migrate-MyFeature.yaml
+# (for built-in targets: cp agent-prompts/_template.yaml ...)
+
+# 3. Edit the file — set at minimum:
+#    pipeline.feature_root  (absolute path to the legacy feature folder)
+#    pipeline.feature_name  (e.g. "MyFeature")
+#    pipeline.mode          (plan | scope | full)
+#    pipeline.target        (simpler_grants | hrsa_pprs | <custom_target_id>)
+
+# 4. Run it
+python run_agent.py --job agent-prompts/migrate-MyFeature.yaml
+```
+
+---
+
+## Job file structure reference
+
+```yaml
+job:
+  name: "Human-readable job name"
+  description: "What this migration does"
+
+pipeline:
+  feature_root:  "Y:/Solution/HRSA/HAB-GPRSSubmission/src/.../FeatureName"
+  feature_name:  "FeatureName"
+  mode:          "plan"           # scope | plan | full
+  target:        "simpler_grants" # simpler_grants | hrsa_pprs
+  dry_run:       false
+  auto_approve:  false
+  force:         false
+  output_root:   null             # null → default output/<feature_name>/
+
+llm:
+  no_llm:    false   # true = template-only scaffold, no API key required
+  provider:  null    # null = auto-detect (anthropic|openai|ollama|openai_compat|llamacpp)
+  model:     null    # null = provider default
+  base_url:  null    # OpenAI-compatible server URL
+  model_path: null   # Path to local GGUF file (llamacpp only)
+  ollama_host: null  # Ollama server URL (default: http://localhost:11434)
+  max_tokens: null   # Max tokens per LLM call (default: 8192)
+  temperature: null  # Sampling temperature (default: 0.2)
+
+notes: |
+  Context for agent / reviewer. E.g.:
+  - Known pfm-* platform library dependencies
+  - Cross-feature imports requiring human review
+  - Expected output file paths
+```
+
+---
+
+## Pipeline stages
+
+| Step | Agent | Output |
+|---|---|---|
+| 1. Config Ingestion | `ConfigIngestionAgent` | Validated config dict |
+| 2. Scoping | `ScopingAgent` | `logs/<run-id>-dependency-graph.json` |
+| 3. Plan Generation | `PlanAgent` | `plans/<feature>-plan-<ts>.md` |
+| 4. Human Approval | `ApprovalGate` | CLI prompt — type `yes` to proceed |
+| 5. Conversion | `ConversionAgent` | `output/<feature>/` + `logs/<run-id>-conversion-log.*` |
+
+---
+
+## Target stacks
+
+| `pipeline.target` | Frontend | Backend | Database |
+|---|---|---|---|
+| `simpler_grants` | Next.js 15 / React 19 | APIFlask Blueprints | SQLAlchemy 2.0 `Mapped[]` |
+| `hrsa_pprs` | Next.js 16 / React 18 | Flask 3.0 Blueprints | psycopg2 raw SQL |
+
+---
+
+## Important constraints
+
+- **Do NOT modify** `plans/`, `logs/`, `output/`, `checkpoints/` — pipeline outputs
+- **Do NOT edit** `config/skillset-config.json` or `config/rules-config.json` unless asked
+- **Prompts** under `prompts/` are plain text — safe to read and suggest edits
+- **`mode: plan` is the safe default** — generates a Plan Document with no code changes
+- **`mode: full`** writes code — always verify the plan first
+- **Dedup**: if a run for this feature+target already completed, the pipeline skips automatically; use `--force` to override
+
+---
+
+## LLM configuration
+
+Auto-detection order (first found wins):
+```
+ANTHROPIC_API_KEY → OPENAI_API_KEY → OLLAMA_MODEL → LLM_BASE_URL → LLAMACPP_MODEL_PATH
+```
+
+No API key? Set `llm.no_llm: true` for template-only scaffold mode.
+
+### LLM failure behaviour
+
+| Context | Behaviour |
+|---|---|
+| Run via `run_agent.py` (agent mode) | Soft-fail — returns Jinja2 template scaffold so you can continue |
+| Run via `main.py` (CLI / human) | Hard-fail — raises `LLMConfigurationError` with actionable instructions |
+
+`run_agent.py` automatically sets `AI_AGENT_MODE=1` before calling the pipeline.
+You can also force agent mode manually:
+```bash
+set AI_AGENT_MODE=1       # Windows CMD
+$env:AI_AGENT_MODE=1      # PowerShell
+export AI_AGENT_MODE=1    # bash/zsh
+```
+
+---
+
+## Recommended workflow
+
+When a user asks to "migrate FeatureName":
+
+1. Check configured targets: `python run_agent.py --setup --list-targets`
+2. If the target doesn't exist, run the setup wizard: `python run_agent.py --setup`
+3. Check: `ls agent-prompts/migrate-featurename*.yaml`
+4. If no job file exists: copy `_template_<target>.yaml`, fill in the values
+5. Run plan mode: `python run_agent.py --job agent-prompts/migrate-featurename.yaml`
+6. Tell the user where the Plan Document was saved (`plans/`)
+7. Wait for the user to review and confirm before running `full` mode
+8. Run full mode: edit job file to `mode: full`, then re-run (or use `--auto-approve` for testing)
+9. Check conversion results: `logs/<run-id>-conversion-log.md`
+
+When a user asks to "configure a new migration target" or "set up migration to X":
+
+1. Run the setup wizard: `python run_agent.py --setup`
+   - Or for CI/agent mode: fill in `agent-prompts/example-wizard-config.json`
+     then: `python run_agent.py --setup --config wizard-config.json --non-interactive`
+2. Review generated prompts in `prompts/` (safe to edit for tuning)
+3. Use the generated `agent-prompts/_template_<target_id>.yaml` for migrations

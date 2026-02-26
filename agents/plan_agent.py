@@ -12,6 +12,16 @@ LLM support is provided via LLMRouter -- any configured provider works:
     Ollama (local), LlamaCpp (local GGUF).
 Pass llm_router=None or use --no-llm to run in template-only mode.
 
+LLM failure behaviour
+---------------------
+  CLI / human mode  — hard-fails with LLMConfigurationError so the user
+                      knows exactly what to fix.  No plan file is written.
+  Agent mode        — falls back to the Markdown template scaffold so the IDE
+                      agent (Cursor, Windsurf, Copilot) can continue and
+                      surface the error to the user.  Detected automatically
+                      via agents.agent_context, or set AI_AGENT_MODE=1 to
+                      force agent mode explicitly.
+
 Prompts are loaded from the prompts/ directory at runtime:
 
   Target: simpler_grants (default)
@@ -31,6 +41,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from prompts import load_prompt
+from agents.agent_context import require_llm_or_raise
 
 if TYPE_CHECKING:
     from agents.llm import LLMRouter
@@ -74,6 +85,20 @@ class PlanAgent:
         "simpler_grants": "plan_system.txt",
         "hrsa_pprs":      "plan_system_hrsa_pprs.txt",
     }
+
+    # Angular file-type dot-suffixes to strip from file stems
+    # e.g. "actionhistory.component.ts" → stem "actionhistory.component" → "actionhistory"
+    _ANGULAR_FILE_SUFFIXES: frozenset = frozenset({
+        "component", "service", "module", "directive", "pipe",
+        "guard", "resolver", "interceptor", "spec",
+    })
+
+    # Class-name suffixes to strip from TypeScript / C# export names
+    # e.g. "ActionHistoryComponent" → "ActionHistory"
+    _CLASS_SUFFIXES: tuple = (
+        "Component", "Service", "Controller", "Module", "Directive",
+        "Pipe", "Guard", "Resolver", "Repository", "Manager", "Handler",
+    )
 
     def __init__(
         self,
@@ -139,12 +164,20 @@ class PlanAgent:
 
         if self._router is not None and self._router.is_available:
             plan_md = self._generate_with_llm(feature_name)
-        else:
-            if self._router is None:
-                logger.info("LLM router not configured -- generating plan from template only.")
-            else:
-                logger.info("LLM router not available -- generating plan from template only.")
+        elif self._router is None:
+            # Explicit --no-llm: silently use template scaffold
+            logger.info("LLM router not configured (--no-llm) -- generating plan from template only.")
             plan_md = self._generate_from_template(feature_name)
+        else:
+            # Router initialised but backend not reachable — treat as LLM failure
+            plan_md = require_llm_or_raise(
+                context=f"plan generation for '{feature_name}'",
+                error=RuntimeError(
+                    "LLM router initialised but no backend is reachable. "
+                    "Check your API key / provider environment variables."
+                ),
+                fallback_fn=lambda: self._generate_from_template(feature_name),
+            )
 
         plan_path = self._save_plan(plan_md, feature_name)
         logger.info("Plan document saved to: %s", plan_path)
@@ -183,13 +216,12 @@ class PlanAgent:
             )
             return response.text
 
-        except LLMNotAvailableError as exc:
-            logger.warning("LLM not available: %s -- falling back to template.", exc)
-            return self._generate_from_template(feature_name)
-
-        except LLMProviderError as exc:
-            logger.error("LLM provider error: %s -- falling back to template.", exc)
-            return self._generate_from_template(feature_name)
+        except (LLMNotAvailableError, LLMProviderError) as exc:
+            return require_llm_or_raise(
+                context=f"plan generation for '{feature_name}'",
+                error=exc,
+                fallback_fn=lambda: self._generate_from_template(feature_name),
+            )
 
     # ------------------------------------------------------------------
     # Template-only generation (no LLM)
@@ -329,8 +361,13 @@ class PlanAgent:
 
     def _describe_target(self, node: dict, mapping: dict) -> str:
         exports = node.get("exports", [])
-        name    = exports[0] if exports else Path(node["id"]).stem
-        tp      = node.get("type", "")
+        if exports:
+            # Strip Angular / ASP.NET class-name suffixes (e.g. "ActionHistoryComponent" → "ActionHistory")
+            name = self._clean_class_name(exports[0])
+        else:
+            # Strip dot-based Angular file suffixes (e.g. "actionhistory.component.ts" → "actionhistory")
+            name = self._clean_stem(node["id"])
+        tp = node.get("type", "")
         if tp == "frontend":
             return f"`{name}.tsx` (React functional component)"
         if tp == "backend":
@@ -344,7 +381,47 @@ class PlanAgent:
         return f"`{self._to_snake(name)}.py`"
 
     @staticmethod
+    def _clean_class_name(class_name: str) -> str:
+        """Strip well-known Angular / ASP.NET class-name suffixes.
+
+        Examples:
+            'ActionHistoryComponent'  → 'ActionHistory'
+            'ActionHistoryController' → 'ActionHistory'
+            'ActionHistoryService'    → 'ActionHistory'
+        """
+        for suffix in PlanAgent._CLASS_SUFFIXES:
+            if class_name.endswith(suffix) and len(class_name) > len(suffix):
+                return class_name[:-len(suffix)]
+        return class_name
+
+    @staticmethod
+    def _clean_stem(node_id: str) -> str:
+        """Extract a clean base name from a node-id file path.
+
+        Strips the file extension and any Angular dot-suffixes from the stem.
+
+        Examples:
+            'actionhistory.component.ts'   → 'actionhistory'
+            'action-history.component.ts'  → 'action-history'
+            'ActionHistoryController.cs'   → 'ActionHistoryController'
+            'search.service.ts'            → 'search'
+        """
+        stem = Path(node_id).stem          # strips last extension only (.ts / .cs / .sql)
+        pieces = stem.split(".")
+        while len(pieces) > 1 and pieces[-1].lower() in PlanAgent._ANGULAR_FILE_SUFFIXES:
+            pieces.pop()
+        return ".".join(pieces)
+
+    @staticmethod
     def _to_snake(name: str) -> str:
+        """Convert PascalCase or kebab-case name to snake_case.
+
+        Examples:
+            'ActionHistory'   → 'action_history'
+            'action-history'  → 'action_history'
+            'actionhistory'   → 'actionhistory'
+        """
+        name = name.replace("-", "_")      # kebab-case → snake_case first
         s1 = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
         return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
 

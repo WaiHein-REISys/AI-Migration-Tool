@@ -19,6 +19,16 @@ LLM support is provided via LLMRouter -- any configured provider works:
     Ollama (local), LlamaCpp (local GGUF).
 Pass llm_router=None to operate in template-only / scaffold mode.
 
+LLM failure behaviour
+---------------------
+  CLI / human mode  — hard-fails with LLMConfigurationError so the user
+                      knows exactly what to fix.  No output files are written.
+  Agent mode        — falls back to the Jinja2 template scaffold so the IDE
+                      agent (Cursor, Windsurf, Copilot) can continue and
+                      surface the error to the user.  Detected automatically
+                      via agents.agent_context, or set AI_AGENT_MODE=1 to
+                      force agent mode explicitly.
+
 Prompts are loaded from the prompts/ directory at runtime:
 
   Target: simpler_grants (default)
@@ -45,6 +55,7 @@ try:
 except ImportError:
     raise ImportError("jinja2 is required. pip install jinja2")
 
+from agents.agent_context import require_llm_or_raise
 from agents.conversion_log import ConversionLog
 from prompts import load_prompt
 
@@ -316,14 +327,30 @@ class ConversionAgent:
         if self._router is not None and self._router.is_available:
             return self._generate_with_llm(source_code, template_context, applicable_rules, step)
         else:
-            logger.warning(
-                "No LLM available -- rendering template without AI assistance for %s",
-                step["id"],
-            )
+            if self._router is not None:
+                # Router initialised but backend not reachable — treat as LLM failure
+                err = RuntimeError(
+                    "LLM router initialised but no backend is reachable. "
+                    "Check your API key / provider environment variables."
+                )
+                def _template_only():
+                    if template_context.strip():
+                        return template_context
+                    raise AmbiguityException(
+                        f"Cannot convert {step['source_file']}: LLM not reachable and "
+                        f"template '{template_name}' produced no output."
+                    )
+                return require_llm_or_raise(
+                    context=f"code generation for '{step['id']}'",
+                    error=err,
+                    fallback_fn=_template_only,
+                )
+            # self._router is None: user explicitly passed --no-llm
+            logger.info("No LLM configured (--no-llm) -- using template scaffold for %s.", step["id"])
             if template_context.strip():
                 return template_context
             raise AmbiguityException(
-                f"Cannot convert {step['source_file']}: no LLM available and template "
+                f"Cannot convert {step['source_file']}: no LLM configured and template "
                 f"'{template_name}' produced no output. "
                 f"Configure an LLM provider or check the template."
             )
@@ -399,19 +426,18 @@ class ConversionAgent:
         except AmbiguityException:
             raise  # re-raise cleanly
 
-        except LLMNotAvailableError as exc:
-            # Fall back to template output if available
-            logger.warning(
-                "[%s] LLM not available: %s -- falling back to template scaffold.", step["id"], exc
+        except (LLMNotAvailableError, LLMProviderError) as exc:
+            def _template_fallback():
+                if template_context.strip():
+                    return template_context
+                raise AmbiguityException(
+                    f"LLM unavailable for {step['id']} and template produced no output: {exc}"
+                )
+            return require_llm_or_raise(
+                context=f"code generation for '{step['id']}'",
+                error=exc,
+                fallback_fn=_template_fallback,
             )
-            if template_context.strip():
-                return template_context
-            raise AmbiguityException(
-                f"LLM unavailable for {step['id']} and template produced no output: {exc}"
-            ) from exc
-
-        except LLMProviderError as exc:
-            raise AmbiguityException(f"LLM provider error during {step['id']}: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Boundary validation (RULE-005)
