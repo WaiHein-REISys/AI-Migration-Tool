@@ -22,15 +22,13 @@ LLM failure behaviour
                       via agents.agent_context, or set AI_AGENT_MODE=1 to
                       force agent mode explicitly.
 
-Prompts are loaded from the prompts/ directory at runtime:
+Prompt file resolution is fully dynamic via prompts.resolve_prompt_filename():
+  1. wizard-registry.json  prompt_files.plan_system  (explicit, authoritative)
+  2. Convention: plan_system_{target_id}.txt          (auto-discovered by file presence)
+  3. Default:   plan_system.txt                       (simpler_grants baseline)
 
-  Target: simpler_grants (default)
-    prompts/plan_system.txt               -- LLM system prompt
-    prompts/plan_document_template.md     -- Markdown scaffold (template-only mode)
-
-  Target: hrsa_pprs
-    prompts/plan_system_hrsa_pprs.txt     -- LLM system prompt for HRSA-Simpler-PPRS
-    prompts/plan_document_template.md     -- same shared Markdown scaffold
+  prompts/plan_document_template.md is always used for template-only / no-LLM mode.
+  No target-to-filename mappings are hardcoded in this module.
 """
 
 import json
@@ -40,7 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from prompts import load_prompt
+from prompts import load_prompt, resolve_prompt_filename
 from agents.agent_context import require_llm_or_raise
 
 if TYPE_CHECKING:
@@ -74,17 +72,10 @@ class PlanAgent:
         Pre-built LLMRouter instance.  Pass None (or use --no-llm) to
         disable LLM calls and fall back to template-only generation.
     target : str
-        Target stack identifier:
-        'simpler_grants' (default) -- Next.js 15 / APIFlask / SQLAlchemy 2.0
-        'hrsa_pprs'                -- Next.js 16 / Flask 3.0 / psycopg2 (HRSA-Simpler-PPRS)
-        Controls which prompt files are loaded from prompts/.
+        Any registered target identifier (e.g. 'simpler_grants', 'hrsa_pprs',
+        'snake_case', or any wizard-generated id).  The correct plan_system
+        prompt is resolved dynamically — no mapping is maintained here.
     """
-
-    # Map target -> system prompt filename in prompts/
-    _SYSTEM_PROMPT_FILES: dict[str, str] = {
-        "simpler_grants": "plan_system.txt",
-        "hrsa_pprs":      "plan_system_hrsa_pprs.txt",
-    }
 
     # Angular file-type dot-suffixes to strip from file stems
     # e.g. "actionhistory.component.ts" → stem "actionhistory.component" → "actionhistory"
@@ -133,9 +124,9 @@ class PlanAgent:
         self.revision_notes  = revision_notes
         self.original_plan   = original_plan
 
-        # Resolve system prompt filename; fall back gracefully for unknown targets
-        self._system_prompt_file = self._SYSTEM_PROMPT_FILES.get(
-            target, self._SYSTEM_PROMPT_FILES["simpler_grants"]
+        # Resolve system prompt filename dynamically — no hardcoded map.
+        self._system_prompt_file = resolve_prompt_filename(
+            target, "plan_system", "plan_system.txt"
         )
         logger.debug(
             "PlanAgent initialised: target=%s, system_prompt=%s, revision=%s",

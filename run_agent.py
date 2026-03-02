@@ -940,7 +940,8 @@ def _run_new_job(args) -> int:
         return 1
 
     content = template_path.read_text(encoding="utf-8")
-    content = _re.sub(r'(feature_root:\s*)".+"', f'feature_root: "{feature_path}"', content)
+    _fp_escaped = str(feature_path).replace("\\", "/")
+    content = _re.sub(r'(feature_root:\s*)".+"', f'feature_root: "{_fp_escaped}"', content)
     content = _re.sub(r'(feature_name:\s*)".+"', f'feature_name: "{feature_name}"', content)
     content = content.replace("<FeatureName>", feature_name)
     content = _re.sub(
