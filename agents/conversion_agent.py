@@ -29,17 +29,14 @@ LLM failure behaviour
                       via agents.agent_context, or set AI_AGENT_MODE=1 to
                       force agent mode explicitly.
 
-Prompts are loaded from the prompts/ directory at runtime:
+Prompt file resolution is fully dynamic via prompts.resolve_prompt_filename():
+  1. wizard-registry.json  prompt_files.conversion_system / target_stack  (explicit)
+  2. Convention: conversion_system_{target_id}.txt / conversion_target_stack_{target_id}.txt
+                 (auto-discovered by file presence)
+  3. Default:   conversion_system.txt / conversion_target_stack.txt  (simpler_grants baseline)
 
-  Target: simpler_grants (default)
-    prompts/conversion_system.txt          -- LLM system prompt template
-    prompts/conversion_target_stack.txt    -- Target stack reference (APIFlask/SQLAlchemy)
-
-  Target: hrsa_pprs
-    prompts/conversion_system_hrsa_pprs.txt       -- LLM system prompt for HRSA-Simpler-PPRS
-    prompts/conversion_target_stack_hrsa_pprs.txt -- Target stack reference (Flask/psycopg2)
-
-Both system prompt files contain {rules_text} and {target_stack_summary} placeholders.
+  No target-to-filename mappings are hardcoded in this module.
+  All system prompt files contain {rules_text} and {target_stack_summary} placeholders.
 
 Requires:
     pip install jinja2
@@ -57,7 +54,7 @@ except ImportError:
 
 from agents.agent_context import require_llm_or_raise
 from agents.conversion_log import ConversionLog
-from prompts import load_prompt
+from prompts import load_prompt, resolve_prompt_filename
 
 if TYPE_CHECKING:
     from agents.llm import LLMRouter
@@ -112,20 +109,12 @@ class ConversionAgent:
     llm_router : LLMRouter | None
         Pre-built LLMRouter instance.  Pass None to use template-only mode.
     target : str
-        Target stack identifier:
-        'simpler_grants' (default) -- Next.js 15 / APIFlask / SQLAlchemy 2.0
-        'hrsa_pprs'                -- Next.js 16 / Flask 3.0 / psycopg2 (HRSA-Simpler-PPRS)
-        Controls which prompt files are loaded from prompts/.
+        Any registered target identifier (e.g. 'simpler_grants', 'hrsa_pprs',
+        'modern', 'snake_case', or any wizard-generated id).  The correct
+        conversion prompts are resolved dynamically — no mapping is maintained here.
     """
 
     TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
-
-    # Map target -> (system_prompt_file, target_stack_file)
-    _PROMPT_FILES: dict[str, tuple[str, str]] = {
-        "simpler_grants": ("conversion_system.txt",           "conversion_target_stack.txt"),
-        "hrsa_pprs":      ("conversion_system_hrsa_pprs.txt", "conversion_target_stack_hrsa_pprs.txt"),
-        "modern":         ("conversion_system_modern.txt",     "conversion_target_stack_modern.txt"),
-    }
 
     def __init__(
         self,
@@ -145,9 +134,12 @@ class ConversionAgent:
         self._router     = llm_router
         self.target      = target
 
-        # Resolve prompt filenames; fall back to simpler_grants for unknown targets
-        self._system_prompt_file, self._target_stack_file = self._PROMPT_FILES.get(
-            target, self._PROMPT_FILES["simpler_grants"]
+        # Resolve prompt filenames dynamically — no hardcoded map.
+        self._system_prompt_file = resolve_prompt_filename(
+            target, "conversion_system", "conversion_system.txt"
+        )
+        self._target_stack_file = resolve_prompt_filename(
+            target, "target_stack", "conversion_target_stack.txt"
         )
         logger.debug(
             "ConversionAgent initialised: target=%s, system_prompt=%s, target_stack=%s",
