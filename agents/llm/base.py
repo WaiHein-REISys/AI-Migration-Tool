@@ -73,6 +73,9 @@ class LLMConfig:
     n_ctx: int           = 4096                 # context window (LlamaCpp)
     n_gpu_layers: int    = -1                   # GPU layers (-1 = all)
 
+    # ---- Subprocess CLI settings ----
+    subprocess_cmd: str  = ""   # CLI command name or path (e.g. "claude", "codex")
+
     # ---- Timeout ----
     timeout_seconds: int = 120
 

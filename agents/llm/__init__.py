@@ -14,6 +14,9 @@ from agents.llm.registry import (
     PROVIDER_OPENAI_COMPAT,
     PROVIDER_OLLAMA,
     PROVIDER_LLAMACPP,
+    PROVIDER_SUBPROCESS,
+    probe_available_providers,
+    select_llm_interactively,
 )
 
 __all__ = [
@@ -34,4 +37,8 @@ __all__ = [
     "PROVIDER_OPENAI_COMPAT",
     "PROVIDER_OLLAMA",
     "PROVIDER_LLAMACPP",
+    "PROVIDER_SUBPROCESS",
+    # Discovery helpers
+    "probe_available_providers",
+    "select_llm_interactively",
 ]

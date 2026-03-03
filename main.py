@@ -104,23 +104,73 @@ def build_llm_router(args: argparse.Namespace):
     """
     Build an LLMRouter from CLI arguments.
 
-    Returns None if --no-llm is set, otherwise delegates to
-    LLMRouter.from_cli_args() which falls back to env-var auto-detection
-    when no explicit --llm-provider is given.
+    Returns None if --no-llm is set.
+
+    Selection logic:
+      1. --no-llm flag            → None (template-only mode)
+      2. --llm-provider / env var → use that provider directly
+      3. --select-llm flag        → always show interactive picker
+      4. interactive TTY, no explicit provider, ≥2 detected
+                                  → show interactive picker
+      5. single provider detected → auto-select silently
+      6. nothing found            → None with a warning
     """
-    if args.no_llm:
+    if getattr(args, "no_llm", False):
         return None
 
     try:
         from agents.llm import LLMRouter
-        router = LLMRouter.from_cli_args(args)
-        if router is None:
+        from agents.llm.registry import probe_available_providers, select_llm_interactively
+
+        # --- Explicit provider given via flag or env var override ---
+        explicit_provider = getattr(args, "llm_provider", None)
+        explicit_subprocess = getattr(args, "llm_subprocess_cmd", None)
+        explicit_env = os.environ.get("LLM_PROVIDER") or os.environ.get("ANTHROPIC_API_KEY") \
+                       or os.environ.get("OPENAI_API_KEY") or os.environ.get("OLLAMA_MODEL") \
+                       or os.environ.get("LLAMACPP_MODEL_PATH") or os.environ.get("LLM_BASE_URL") \
+                       or os.environ.get("LLM_SUBPROCESS_CMD")
+        force_select = getattr(args, "select_llm", False)
+
+        if not force_select and (explicit_provider or explicit_subprocess or explicit_env):
+            # Fast path: provider is already known
+            router = LLMRouter.from_cli_args(args)
+            if router is None:
+                logger.warning(
+                    "Configured provider is unavailable — falling back to template-only mode."
+                )
+            return router
+
+        # --- Interactive selection path ---
+        options = probe_available_providers()
+
+        if force_select or (
+            not explicit_provider
+            and not explicit_subprocess
+            and sys.stdin.isatty()
+            and len(options) > 1
+        ):
+            chosen_config = select_llm_interactively(options)
+            if chosen_config is None:
+                return None
+            return LLMRouter.from_config(chosen_config)
+
+        if len(options) == 1:
+            cfg = options[0]["config"]
+            logger.info("Auto-selected LLM provider: %s", options[0]["label"])
+            return LLMRouter.from_config(cfg)
+
+        if len(options) == 0:
             logger.warning(
-                "No LLM provider could be configured from CLI args or environment variables. "
-                "Falling back to template-only mode. "
-                "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / OLLAMA_MODEL or use --llm-provider."
+                "No LLM provider detected. Falling back to template-only mode. "
+                "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / OLLAMA_MODEL, install the "
+                "'claude' or 'codex' CLI, or use --llm-provider."
             )
+            return None
+
+        # Multiple options, non-interactive — use auto-detection order
+        router = LLMRouter.from_cli_args(args)
         return router
+
     except ImportError as exc:
         logger.warning("agents.llm not available (%s) -- template-only mode.", exc)
         return None
@@ -691,10 +741,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--llm-provider",
         type=str,
         default=None,
-        choices=["anthropic", "openai", "openai_compat", "ollama", "llamacpp"],
+        choices=["anthropic", "openai", "openai_compat", "ollama", "llamacpp", "subprocess"],
         metavar="PROVIDER",
         help=(
-            "LLM provider to use. Choices: anthropic, openai, openai_compat, ollama, llamacpp. "
+            "LLM provider to use. Choices: anthropic, openai, openai_compat, ollama, llamacpp, subprocess. "
             "Auto-detected from env vars when omitted."
         ),
     )
@@ -757,6 +807,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="SECONDS",
         help="Timeout in seconds per LLM request (default: 120). Increase for Ollama code generation (e.g. 300–600).",
+    )
+    llm_group.add_argument(
+        "--llm-subprocess-cmd",
+        type=str,
+        default=None,
+        metavar="CMD",
+        help=(
+            "CLI command to use as the LLM backend via subprocess. "
+            "Examples: 'claude' (Claude Code CLI), 'codex' (OpenAI Codex CLI), "
+            "or any command that reads a prompt from stdin and writes output to stdout. "
+            "Sets --llm-provider subprocess automatically."
+        ),
+    )
+    llm_group.add_argument(
+        "--select-llm",
+        action="store_true",
+        help=(
+            "Show an interactive menu of all detected LLM providers and let you choose. "
+            "Overrides auto-detection. Useful when multiple providers are installed."
+        ),
     )
 
     return parser

@@ -213,15 +213,17 @@ def _job_to_args(job: dict, overrides: dict | None = None) -> argparse.Namespace
         rules_config    = str(ROOT / "config" / "rules-config.json"),
 
         # --- LLM ---
-        no_llm          = _get(llm, "no_llm",      False),
-        llm_provider    = _get(llm, "provider"),
-        llm_model       = _get(llm, "model"),
-        llm_base_url    = _get(llm, "base_url"),
-        llm_model_path  = _get(llm, "model_path"),
-        ollama_host     = _get(llm, "ollama_host"),
-        llm_max_tokens  = _get(llm, "max_tokens"),
-        llm_temperature = _get(llm, "temperature"),
-        llm_timeout     = _get(llm, "timeout"),
+        no_llm              = _get(llm, "no_llm",         False),
+        llm_provider        = _get(llm, "provider"),
+        llm_model           = _get(llm, "model"),
+        llm_base_url        = _get(llm, "base_url"),
+        llm_model_path      = _get(llm, "model_path"),
+        ollama_host         = _get(llm, "ollama_host"),
+        llm_max_tokens      = _get(llm, "max_tokens"),
+        llm_temperature     = _get(llm, "temperature"),
+        llm_timeout         = _get(llm, "timeout"),
+        llm_subprocess_cmd  = _get(llm, "subprocess_cmd"),
+        select_llm          = False,   # never auto-trigger picker from job files
     )
 
     # Default feature_name from feature_root stem if not set
@@ -1160,6 +1162,25 @@ def main() -> int:
         ),
     )
 
+    # ── LLM overrides ────────────────────────────────────────────────────────
+    parser.add_argument(
+        "--llm-subprocess-cmd",
+        type=str, default=None, metavar="CMD",
+        help=(
+            "Use a CLI tool as the LLM backend via subprocess. "
+            "Examples: 'claude' (Claude Code CLI), 'codex' (OpenAI Codex CLI). "
+            "Sets --llm-provider subprocess automatically."
+        ),
+    )
+    parser.add_argument(
+        "--select-llm",
+        action="store_true",
+        help=(
+            "Show an interactive menu of all detected LLM providers and pick one. "
+            "Auto-triggered in interactive TTY sessions when multiple providers are found."
+        ),
+    )
+
     args = parser.parse_args()
 
     # ── Dispatch ─────────────────────────────────────────────────────────────
@@ -1226,6 +1247,13 @@ def main() -> int:
     # Apply --mode override (lets agents change mode without editing the YAML)
     if args.mode:
         ns.mode = args.mode
+
+    # Apply CLI LLM overrides — these win over job-file llm section
+    if getattr(args, "llm_subprocess_cmd", None):
+        ns.llm_subprocess_cmd = args.llm_subprocess_cmd
+        ns.llm_provider       = "subprocess"
+    if getattr(args, "select_llm", False):
+        ns.select_llm = True
 
     # Validate required fields
     if not ns.feature_root:
