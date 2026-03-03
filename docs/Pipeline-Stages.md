@@ -1,6 +1,6 @@
 # Pipeline Stages
 
-The pipeline has five sequential stages plus an optional plan revision step.
+The pipeline has six sequential stages plus an optional plan revision step.
 All stages are orchestrated by `main.py` and controlled by the `pipeline.mode` setting.
 
 | Stage | Mode | Description |
@@ -11,6 +11,7 @@ All stages are orchestrated by `main.py` and controlled by the `pipeline.mode` s
 | 3b. Plan Revision | *(on demand)* | Re-generates plan with feedback |
 | 4. Approval | `full` | Human or agent approves the plan |
 | 5. Conversion | `full` | LLM converts each file |
+| 6. Validation Simulation | `full` | File checks + LLM-based old-vs-new behavior simulation before success |
 
 ---
 
@@ -233,6 +234,28 @@ stable run ID in this registry and exit immediately:
 ```
 
 Pass `--force` to bypass and re-run from scratch.
+
+---
+
+## Stage 6 — Validation Simulation
+
+**Agent:** `ValidationAgent`
+
+**Inputs:**
+- Approved conversion plan (step definitions)
+- Converted output files in `output/<feature>/`
+- Source files in legacy feature root
+- Optional LLM router for behavior simulation
+
+**What it does:**
+1. Verifies each converted output file exists and is non-empty
+2. Runs an LLM simulation to compare OLD source intent vs NEW source behavior
+3. Writes validation artefacts:
+   - `logs/<run-id>-validation-report.json`
+   - `logs/<run-id>-validation-report.md`
+4. Blocks final success if any validation item fails
+
+**Dry run behavior:** Validation is skipped in `dry_run: true` mode.
 
 ---
 

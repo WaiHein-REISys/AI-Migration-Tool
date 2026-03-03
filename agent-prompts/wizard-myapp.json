@@ -48,5 +48,13 @@
       "access_pattern": "psycopg2 raw SQL with RealDictCursor",
       "migration_tool": "custom Python scripts"
     }
+  },
+
+  "job": {
+    "_note": "Optional. If provided, setup will also generate a ready migration job file with placeholders populated.",
+    "feature_name": "ActionHistory",
+    "feature_root": "C:/path/to/your/legacy/codebase/src/app/features/ActionHistory",
+    "mode": "plan",
+    "output_filename": "migrate-actionhistory-my_nextjs_flask.yaml"
   }
 }

@@ -12,6 +12,7 @@ and returns a string (or dict for JSON config entries).
 """
 
 import textwrap
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -298,6 +299,48 @@ def generate_job_template(answers: dict) -> str:
           - Cross-feature imports that need human review
           - Expected output files
     """)
+
+
+def populate_job_template(
+    template_content: str,
+    *,
+    feature_name: str,
+    feature_root: str,
+    mode: str = "plan",
+) -> str:
+    """
+    Fill a wizard-generated job template with concrete feature values.
+
+    This is used when setup input already includes an initial feature selection
+    and we want a ready-to-run plan job file immediately after setup.
+    """
+    safe_feature_name = (feature_name or "").strip()
+    safe_feature_root = str(feature_root or "").strip().replace("\\", "/")
+    safe_mode = (mode or "plan").strip()
+    if safe_mode not in {"scope", "plan", "full"}:
+        safe_mode = "plan"
+
+    content = template_content
+    content = content.replace("<FeatureName>", safe_feature_name)
+    content = re.sub(
+        r'(feature_root:\s*)".*?"',
+        lambda m: f'{m.group(1)}"{safe_feature_root}"',
+        content,
+        count=1,
+    )
+    content = re.sub(
+        r'(feature_name:\s*)".*?"',
+        lambda m: f'{m.group(1)}"{safe_feature_name}"',
+        content,
+        count=1,
+    )
+    content = re.sub(
+        r'(mode:\s*)".*?"',
+        lambda m: f'{m.group(1)}"{safe_mode}"',
+        content,
+        count=1,
+    )
+    return content
 
 
 # ---------------------------------------------------------------------------

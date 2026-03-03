@@ -120,11 +120,34 @@ def run_wizard(
     # ------------------------------------------------------------------ #
     _print_section("Agent job template")
 
+    job_template_content = generator.generate_job_template(answers)
     writer.write(
         AGENT_PROMPTS_DIR / f"_template_{target_id}.yaml",
-        generator.generate_job_template(answers),
+        job_template_content,
         overwrite=overwrite,
     )
+
+    # Optional: create a populated plan job file immediately after setup.
+    # Supported input schema (in wizard config):
+    #   "job": { "feature_name": "...", "feature_root": "...", "mode": "plan", "output_filename": "..." }
+    job_cfg = answers.get("job") or {}
+    feature_name = (job_cfg.get("feature_name") or "").strip()
+    feature_root = (job_cfg.get("feature_root") or "").strip()
+    if feature_name and feature_root:
+        safe_feature = feature_name.lower().replace(" ", "-").replace("_", "-")
+        default_name = f"migrate-{safe_feature}-{target_id}.yaml"
+        out_name = (job_cfg.get("output_filename") or default_name).strip()
+        populated = generator.populate_job_template(
+            job_template_content,
+            feature_name=feature_name,
+            feature_root=feature_root,
+            mode=job_cfg.get("mode", "plan"),
+        )
+        writer.write(
+            AGENT_PROMPTS_DIR / out_name,
+            populated,
+            overwrite=overwrite,
+        )
 
     # ------------------------------------------------------------------ #
     # 3. skillset-config.json                                              #
@@ -226,6 +249,8 @@ def list_targets() -> None:
 
 def _print_next_steps(answers: dict, target_id: str) -> None:
     _print_header("Next Steps")
+    job_cfg = answers.get("job") or {}
+    has_populated_job = bool(job_cfg.get("feature_name") and job_cfg.get("feature_root"))
 
     print(f"  1. Review the generated prompts in  prompts/")
     _safe_print(f"       plan_system_{target_id}.txt")
@@ -238,6 +263,12 @@ def _print_next_steps(answers: dict, target_id: str) -> None:
         f"agent-prompts/migrate-<FeatureName>-{target_id}.yaml"
     )
     print(f"     Then set:  pipeline.feature_root  and  pipeline.feature_name")
+    if has_populated_job:
+        safe_feature = str(job_cfg.get("feature_name", "")).lower().replace(" ", "-").replace("_", "-")
+        auto_job = job_cfg.get("output_filename") or f"migrate-{safe_feature}-{target_id}.yaml"
+        _safe_print(
+            f"     Auto-generated from config: agent-prompts/{auto_job}"
+        )
     print()
     print(f"  3. Run in plan mode first (generates a Plan Document, no code written):")
     _safe_print(

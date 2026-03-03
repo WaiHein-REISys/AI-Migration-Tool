@@ -8,7 +8,7 @@ Python source code.
 
 ---
 
-## Files
+## Core Files
 
 | File | Used by | Purpose |
 |---|---|---|
@@ -19,11 +19,28 @@ Python source code.
 
 ---
 
+## Target-specific Prompt Variants
+
+The tool can resolve target-specific prompt files dynamically:
+
+- `plan_system_<target_id>.txt`
+- `conversion_system_<target_id>.txt`
+- `conversion_target_stack_<target_id>.txt`
+
+Resolution order is handled by `prompts.resolve_prompt_filename(...)`:
+1. `config/wizard-registry.json` explicit prompt mapping
+2. Convention-based `<base>_<target_id>.txt` file discovery
+3. Default core prompt file fallback
+
+This means wizard-generated targets can use custom prompts with no Python code changes.
+
+---
+
 ## How to edit prompts
 
 1. Open the relevant `.txt` or `.md` file in this folder.
 2. Edit the text directly — no Python changes needed.
-3. Placeholders like `{rules_text}` and `{feature_name}` are filled at runtime
+3. Placeholders like `{rules_text}`, `{target_stack_summary}`, and `{feature_name}` are filled at runtime
    by the agent; do not remove them.
 4. The loader (`prompts/__init__.py`) caches files on first read. When running
    the pipeline normally this is transparent. During development you can call

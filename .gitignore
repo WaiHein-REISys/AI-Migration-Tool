@@ -9,6 +9,7 @@ plans/
 logs/
 output/
 checkpoints/
+reports/
 
 # ---------------------------------------------------------------------------
 # Wizard-generated files that contain local machine paths (not portable)

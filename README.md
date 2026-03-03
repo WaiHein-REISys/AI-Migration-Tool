@@ -176,7 +176,7 @@ See [Agent Interactive Mode](docs/Agent-Interactive-Mode.md) for the full comman
 ## Pipeline Stages
 
 ```
-Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Conversion
+Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Conversion → Validation Simulation
 ```
 
 | Stage | Agent | Output |
@@ -186,6 +186,7 @@ Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Con
 | 3. Plan Generation | `PlanAgent` | `plans/<feature>-plan-<ts>.md` |
 | 4. Approval | `ApprovalGate` | Human types `yes` **or** agent writes `.approved` marker |
 | 5. Conversion | `ConversionAgent` | `output/<feature>/` + `logs/<run-id>-conversion-log.*` |
+| 6. Validation Simulation | `ValidationAgent` | `logs/<run-id>-validation-report.(json|md)`; success only confirmed after pass |
 
 Plan revision (step 3b):
 - `--revise-plan --feedback "..."` re-runs `PlanAgent` with LLM feedback injected
@@ -269,11 +270,17 @@ python run_agent.py --setup --dry-run                # preview only
 python run_agent.py --setup --list-targets           # list configured targets
 ```
 
+Interactive setup now also supports optional starter-job creation:
+- Select `feature_name` from detected OLD source feature folders
+- Or provide a custom absolute path
+- Wizard writes a populated migration job file with `<FeatureName>` replaced
+
 For each new target `<id>`, the wizard creates:
 - `prompts/plan_system_<id>.txt`
 - `prompts/conversion_system_<id>.txt`
 - `prompts/conversion_target_stack_<id>.txt`
 - `agent-prompts/_template_<id>.yaml`
+- Optional populated job: `agent-prompts/migrate-<feature>-<id>.yaml` (when a feature is selected/provided)
 - Entries in `config/skillset-config.json` and `config/wizard-registry.json`
 
 See [Setup Wizard](docs/Setup-Wizard.md) for full details and the JSON config schema.

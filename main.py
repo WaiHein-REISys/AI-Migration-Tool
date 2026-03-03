@@ -62,6 +62,7 @@ from agents.scoping_agent import ScopingAgent
 from agents.plan_agent import PlanAgent
 from agents.conversion_agent import ConversionAgent, AmbiguityException
 from agents.conversion_log import ConversionLog
+from agents.validation_agent import ValidationAgent
 from agents.approval_gate import (
     ApprovalGate,
     ApprovalRejectedError,
@@ -360,15 +361,38 @@ def run_pipeline(args: argparse.Namespace) -> int:
     md_log_path = DEFAULT_LOGS_DIR / f"{run_id}-conversion-log.md"
     conv_log.export_markdown(md_log_path)
 
-    # Print summary
+    # ---- Step 6: Output Validation Simulation ----
+    print_banner("Step 6: Output Validation Simulation")
+    validation_agent = ValidationAgent(
+        approved_plan=approved_plan,
+        output_root=approved_plan["output_root"],
+        run_id=run_id,
+        logs_dir=DEFAULT_LOGS_DIR,
+        llm_router=llm_router,
+        dry_run=args.dry_run,
+    )
+    validation = validation_agent.execute(
+        completed_step_ids=summary.get("completed_steps", []),
+        all_steps=all_steps,
+    )
+
+    # Print summary (success confirmed only after validation passes)
     print_banner("Pipeline Complete")
     print(f"  Feature:      {dependency_graph['feature_name']}")
     print(f"  Run ID:       {run_id}")
     print(f"  Completed:    {summary['completed']} / {summary['total']} steps")
     print(f"  Flagged:      {summary['flagged']} step(s) need human review")
+    print(
+        f"  Validation:   {validation['status']} "
+        f"({validation['passed']}/{validation['total_checked']} passed)"
+    )
     print(f"  Output:       {approved_plan['output_root']}")
     print(f"  Log (JSON):   {log_path}")
     print(f"  Log (MD):     {md_log_path}")
+    if validation.get("report_json"):
+        print(f"  Validation:   {validation['report_json']}")
+    if validation.get("report_md"):
+        print(f"  ValidationMD: {validation['report_md']}")
     print(f"  Checkpoint:   {checkpoint.path}")
     print()
 
@@ -382,7 +406,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
             "Resolve flagged items and resume with: python main.py --run-id %s --resume", run_id
         )
 
-    return 0 if summary["flagged"] == 0 else 1
+    if validation["status"] == "failed":
+        logger.error("[X] Validation failed. Review report before confirming success.")
+        for finding in validation.get("findings", []):
+            if finding.get("status") != "PASS":
+                logger.error("   [%s] %s", finding.get("step"), finding.get("reason"))
+
+    return 0 if summary["flagged"] == 0 and validation["status"] != "failed" else 1
 
 
 # ---------------------------------------------------------------------------
@@ -942,15 +972,37 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
     md_log_path = DEFAULT_LOGS_DIR / f"{run_id}-conversion-log.md"
     conv_log.export_markdown(md_log_path)
 
+    print_banner("Step 6: Output Validation Simulation")
+    validation_agent = ValidationAgent(
+        approved_plan=approved_plan,
+        output_root=approved_plan["output_root"],
+        run_id=run_id,
+        logs_dir=DEFAULT_LOGS_DIR,
+        llm_router=llm_router,
+        dry_run=args.dry_run,
+    )
+    validation = validation_agent.execute(
+        completed_step_ids=summary.get("completed_steps", []),
+        all_steps=all_steps,
+    )
+
     print_banner("Pipeline Complete")
     print(f"  Feature:      {dependency_graph['feature_name']}")
     print(f"  Run ID:       {run_id}")
     print(f"  LLM:          {_describe_router(llm_router)}")
     print(f"  Completed:    {summary['completed']} / {summary['total']} steps")
     print(f"  Flagged:      {summary['flagged']} step(s) need human review")
+    print(
+        f"  Validation:   {validation['status']} "
+        f"({validation['passed']}/{validation['total_checked']} passed)"
+    )
     print(f"  Output:       {approved_plan['output_root']}")
     print(f"  Log (JSON):   {log_path}")
     print(f"  Log (MD):     {md_log_path}")
+    if validation.get("report_json"):
+        print(f"  Validation:   {validation['report_json']}")
+    if validation.get("report_md"):
+        print(f"  ValidationMD: {validation['report_md']}")
     print(f"  Checkpoint:   {checkpoint.path}")
     print()
 
@@ -964,7 +1016,13 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
             "Resolve flagged items and resume with: python main.py --run-id %s --resume", run_id
         )
 
-    return 0 if summary["flagged"] == 0 else 1
+    if validation["status"] == "failed":
+        logger.error("[X] Validation failed. Review report before confirming success.")
+        for finding in validation.get("findings", []):
+            if finding.get("status") != "PASS":
+                logger.error("   [%s] %s", finding.get("step"), finding.get("reason"))
+
+    return 0 if summary["flagged"] == 0 and validation["status"] != "failed" else 1
 
 
 if __name__ == "__main__":

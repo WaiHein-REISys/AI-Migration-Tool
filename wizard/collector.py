@@ -510,7 +510,7 @@ def collect_target_info(prefill: dict | None = None) -> dict:
 def collect_answers(prefill: dict | None = None) -> dict:
     """
     Run the complete interactive Q&A and return an *answers* dict:
-        { source, target, target_id, created_at }
+        { source, target, target_id, job?, created_at }
 
     If *prefill* is provided, its values are used as defaults (interactive)
     or as the full answer set (non-interactive, when all keys are present).
@@ -541,9 +541,71 @@ def collect_answers(prefill: dict | None = None) -> dict:
     )
     target_id = re.sub(r"[^\w]", "_", suggested.lower()).strip("_")
 
-    return {
+    # Optional: pick an initial feature now so setup can also generate
+    # a ready-to-run populated migration job file.
+    job_cfg = dict(pf.get("job") or {})
+    feature_root_prefill = job_cfg.get("feature_root", "")
+    feature_name_prefill = job_cfg.get("feature_name", "")
+
+    _section("Optional Starter Job (Feature Selection)")
+    print(
+        "  You can select a feature from the OLD source now.\n"
+        "  The wizard will generate a populated migration job file so\n"
+        "  <FeatureName> placeholders are replaced immediately."
+    )
+    print()
+
+    want_job = _yes_no("Create a populated starter job file now?", default=True)
+    if want_job:
+        source_root = source.get("root", "")
+        selected_feature_root = ""
+        selected_feature_name = ""
+
+        if source_root and Path(source_root).is_dir():
+            selected_feature_root, selected_feature_name = collect_feature_selection(
+                source_root=source_root,
+                prefill=feature_root_prefill or None,
+            )
+        else:
+            selected_feature_root = _safe_input(
+                "Feature folder absolute path",
+                feature_root_prefill,
+            )
+            selected_feature_name = Path(selected_feature_root).name if selected_feature_root else ""
+
+        selected_feature_name = _safe_input(
+            "Feature name to use in job file",
+            feature_name_prefill or selected_feature_name,
+        ).strip()
+
+        default_mode = (job_cfg.get("mode") or "plan").strip()
+        selected_mode = _safe_input(
+            "Starter job mode (scope | plan | full)",
+            default_mode,
+        ).strip().lower()
+        if selected_mode not in {"scope", "plan", "full"}:
+            selected_mode = "plan"
+
+        safe_feature = selected_feature_name.lower().replace(" ", "-").replace("_", "-")
+        default_file = f"migrate-{safe_feature or 'feature'}-{target_id}.yaml"
+        output_filename = _safe_input(
+            "Starter job filename (saved in agent-prompts/)",
+            job_cfg.get("output_filename", default_file),
+        ).strip()
+
+        job_cfg = {
+            "feature_name": selected_feature_name,
+            "feature_root": selected_feature_root,
+            "mode": selected_mode,
+            "output_filename": output_filename,
+        }
+
+    result = {
         "source":     source,
         "target":     target,
         "target_id":  target_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    if job_cfg:
+        result["job"] = job_cfg
+    return result

@@ -98,6 +98,7 @@ For a new target named `my_nextjs_flask`:
 | Conversion prompt | `prompts/conversion_system_my_nextjs_flask.txt` | LLM instructions for code conversion |
 | Stack reference | `prompts/conversion_target_stack_my_nextjs_flask.txt` | Target stack patterns injected at runtime |
 | Job template | `agent-prompts/_template_my_nextjs_flask.yaml` | Ready-to-fill migration job template |
+| Optional populated job | `agent-prompts/migrate-<feature>-my_nextjs_flask.yaml` | Auto-generated if `job.feature_name` + `job.feature_root` are provided in setup config |
 | Skillset entries | `config/skillset-config.json` | `target_stack_*` + `project_structure_*` blocks |
 | Registry entry | `config/wizard-registry.json` | Idempotency guard; stores source/target roots |
 
@@ -160,14 +161,26 @@ this structure:
       "access_pattern": "psycopg2 raw SQL with RealDictCursor",
       "migration_tool": "custom Python scripts"
     }
+  },
+
+  "job": {
+    "feature_name": "ActionHistory",
+    "feature_root": "C:/path/to/your/legacy/codebase/src/app/features/ActionHistory",
+    "mode": "plan",
+    "output_filename": "migrate-actionhistory-my_nextjs_flask.yaml"
   }
 }
 ```
 
 **Required fields:** `target_id`, `source.root`, `target.root`
 
-**Optional fields:** All `frontend_details`, `backend_details`, `database_details`.
+**Optional fields:** All `frontend_details`, `backend_details`, `database_details`, and `job.*`.
 If omitted, the wizard uses auto-detected defaults.
+
+`job` behavior:
+- If both `job.feature_name` and `job.feature_root` are present, setup writes a concrete job file with placeholders already populated.
+- `job.mode` defaults to `plan` when omitted.
+- `job.output_filename` defaults to `migrate-<feature>-<target_id>.yaml` when omitted.
 
 See `agent-prompts/wizard-myapp.json` for a concrete filled-in example.
 
