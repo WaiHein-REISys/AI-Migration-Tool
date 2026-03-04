@@ -400,6 +400,8 @@ class LLMRouter:
         if getattr(args, "llm_subprocess_cmd", None):
             config.provider        = PROVIDER_SUBPROCESS
             config.subprocess_cmd  = args.llm_subprocess_cmd
+        if getattr(args, "llm_subprocess_env", None):
+            config.subprocess_env  = dict(args.llm_subprocess_env)
 
         logger.info(
             "LLM configured from CLI: provider=%s model=%s base_url=%s",

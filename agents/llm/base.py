@@ -75,6 +75,14 @@ class LLMConfig:
 
     # ---- Subprocess CLI settings ----
     subprocess_cmd: str  = ""   # CLI command name or path (e.g. "claude", "codex")
+    subprocess_env: dict = field(default_factory=dict)
+    # Extra env vars injected into the subprocess environment on every call.
+    # Values may contain ${VAR} placeholders that are expanded from the host env.
+    # Example (in job YAML):
+    #   llm:
+    #     subprocess_env:
+    #       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+    #       MY_CUSTOM_VAR:     "some-value"
 
     # ---- Timeout ----
     timeout_seconds: int = 120

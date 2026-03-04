@@ -223,6 +223,7 @@ def _job_to_args(job: dict, overrides: dict | None = None) -> argparse.Namespace
         llm_temperature     = _get(llm, "temperature"),
         llm_timeout         = _get(llm, "timeout"),
         llm_subprocess_cmd  = _get(llm, "subprocess_cmd"),
+        llm_subprocess_env  = _get(llm, "subprocess_env", {}),  # {KEY: val} injected into subprocess
         select_llm          = False,   # never auto-trigger picker from job files
     )
 
@@ -1231,6 +1232,13 @@ def main() -> int:
         print(f"[ERROR] Failed to parse job file {job_path}: {exc}", file=sys.stderr)
         return 1
 
+    # ── Cleanup stale artefacts (older than 1 day) ────────────────────────────
+    try:
+        from agents.cleanup import prune_old_artefacts
+        prune_old_artefacts(ROOT)
+    except Exception:
+        pass  # never let cleanup block a run
+
     # CLI overrides (only forward flags that were explicitly set)
     overrides: dict = {}
     if args.dry_run:
@@ -1273,9 +1281,34 @@ def main() -> int:
         )
         ns.auto_approve = True
 
-    # Configure logging
-    from main import configure_logging, build_llm_router, _run_pipeline_with_router, print_banner
+    # Configure logging early so subsequent helpers can log properly
+    from main import (
+        configure_logging, build_llm_router, _run_pipeline_with_router,
+        _stable_run_id, _is_run_complete, print_banner,
+    )
     configure_logging(verbose=ns.verbose)
+
+    # ── Early-exit check BEFORE building LLM router ───────────────────────────
+    # If the run is already complete and --force was not requested, skip the
+    # interactive LLM picker entirely — there is nothing for the LLM to do.
+    if not ns.force and not getattr(ns, "run_id", None):
+        _pre_run_id = _stable_run_id(
+            ns.feature_name, ns.feature_root or "", ns.target or "simpler_grants"
+        )
+        if _is_run_complete(_pre_run_id):
+            print_banner("Already Complete — Skipping")
+            print(f"  Run ID:    {_pre_run_id}")
+            print(f"  Feature:   {ns.feature_name}")
+            print(f"  Target:    {ns.target}")
+            print()
+            print("  All steps were completed in a previous run.")
+            print("  Artefacts (plan, dependency graph, conversion log) are unchanged.")
+            print()
+            print("  To force a fresh run:")
+            print(f"    python run_agent.py --job {job_path} --force")
+            print("  To view the plan:      check plans/ for this run_id")
+            print()
+            return 0
 
     llm_router = build_llm_router(ns)
     from main import _describe_router

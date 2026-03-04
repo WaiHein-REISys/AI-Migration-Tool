@@ -19,7 +19,8 @@ the **Setup Wizard** lets you configure any custom Source → Target pair in min
 | *(custom)* | Any stack — configured by the Setup Wizard | No code changes needed |
 
 The tool supports **any LLM backend** — Anthropic Claude, OpenAI GPT, local Ollama models,
-LM Studio / vLLM (OpenAI-compatible), and local GGUF files via llama.cpp.
+LM Studio / vLLM (OpenAI-compatible), local GGUF files via llama.cpp, and **CLI tools such as
+Claude Code CLI (`claude`) and OpenAI Codex CLI (`codex`) via subprocess delegation**.
 
 It also supports **AI agent mode** for Cursor, GitHub Copilot, Windsurf, and AntiGravity — agents
 can discover features, create job files, check status, approve plans, request revisions,
@@ -70,10 +71,10 @@ pip install -r requirements.txt
 
 ### 3. Configure your LLM provider
 
-Auto-detected from environment variables (first found wins):
+Auto-detected from environment variables **and installed CLI tools** (first found wins):
 
 ```bash
-# Anthropic Claude (recommended)
+# Anthropic Claude API
 set ANTHROPIC_API_KEY=sk-ant-...          # Windows CMD
 $env:ANTHROPIC_API_KEY = "sk-ant-..."    # PowerShell
 
@@ -89,6 +90,25 @@ set LLM_MODEL=local-model
 
 # Local GGUF via llama.cpp
 set LLAMACPP_MODEL_PATH=C:\models\mistral-7b.Q4_K_M.gguf
+
+# Claude Code CLI or OpenAI Codex CLI — no env var needed
+# Auto-detected if `claude` or `codex` is on your PATH
+# Or set explicitly:
+set LLM_SUBPROCESS_CMD=claude             # Windows CMD
+export LLM_SUBPROCESS_CMD=claude          # macOS/Linux
+```
+
+**Auto-detect priority order:**
+```
+LLM_PROVIDER (explicit) → LLAMACPP_MODEL_PATH → OLLAMA_MODEL → LLM_BASE_URL
+→ OPENAI_API_KEY → ANTHROPIC_API_KEY → LLM_SUBPROCESS_CMD → claude on PATH → codex on PATH
+```
+
+**Interactive provider picker** — if you're running manually in a terminal and multiple
+providers are detected, use `--select-llm` to choose:
+
+```bash
+python run_agent.py --job agent-prompts/migrate-action-history.yaml --select-llm
 ```
 
 ### 3b. Configure a custom target (optional)
@@ -170,6 +190,8 @@ See [Agent Interactive Mode](docs/Agent-Interactive-Mode.md) for the full comman
 | `--verbose` | Show DEBUG-level logs |
 | `--mode <scope\|plan\|full>` | Override `pipeline.mode` without editing the YAML |
 | `--json` | Machine-readable JSON output for agent parsing |
+| `--llm-subprocess-cmd CMD` | Use a CLI tool as LLM backend (`claude`, `codex`, etc.) |
+| `--select-llm` | Show interactive picker of all detected providers (human TTY only) |
 
 ---
 
@@ -199,20 +221,83 @@ See [Pipeline Stages](docs/Pipeline-Stages.md) for full details.
 
 ## LLM Providers
 
-| Provider | Env var / flag | Package |
-|---|---|---|
-| `anthropic` | `ANTHROPIC_API_KEY` | included |
-| `openai` | `OPENAI_API_KEY` | `pip install openai` |
-| `openai_compat` | `LLM_BASE_URL` | `pip install openai` |
-| `ollama` | `OLLAMA_MODEL` | `pip install ollama` (optional) |
-| `llamacpp` | `LLAMACPP_MODEL_PATH` | `pip install llama-cpp-python` |
+| Provider | Env var / flag | Package | Notes |
+|---|---|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY` | included | Claude API |
+| `openai` | `OPENAI_API_KEY` | `pip install openai` | GPT models |
+| `openai_compat` | `LLM_BASE_URL` | `pip install openai` | LM Studio, vLLM, Azure |
+| `ollama` | `OLLAMA_MODEL` | `pip install ollama` (optional) | Local Ollama server |
+| `llamacpp` | `LLAMACPP_MODEL_PATH` | `pip install llama-cpp-python` | Local GGUF file |
+| `subprocess` | `LLM_SUBPROCESS_CMD` or `--llm-subprocess-cmd` | none (CLI must be installed) | Claude Code CLI, Codex CLI, any CLI |
 
-Auto-detect order:
+Auto-detect priority order:
 ```
-ANTHROPIC_API_KEY → OPENAI_API_KEY → OLLAMA_MODEL → LLM_BASE_URL → LLAMACPP_MODEL_PATH
+LLM_PROVIDER (explicit) → LLAMACPP_MODEL_PATH → OLLAMA_MODEL → LLM_BASE_URL
+→ OPENAI_API_KEY → ANTHROPIC_API_KEY → LLM_SUBPROCESS_CMD → claude on PATH → codex on PATH
 ```
 
 Use `llm.no_llm: true` (or `--no-llm`) for template-only scaffold mode — no API key needed.
+
+### Subprocess CLI provider (Claude Code CLI / Codex CLI)
+
+The `subprocess` provider shells out to an installed CLI tool instead of calling an API directly.
+This lets you use **Claude Code CLI** (`claude`) or **OpenAI Codex CLI** (`codex`) as LLM backends.
+
+**Auto-detected** when the CLI is on your PATH and no API key env vars are set — no configuration needed.
+
+#### Cursor Agent / Windsurf Agent (non-interactive)
+
+Agents run without a TTY, so the interactive picker never fires. Use the explicit flag or job-file field:
+
+```bash
+# Via CLI flag (works with any run_agent.py command)
+python run_agent.py --job agent-prompts/migrate-action-history.yaml \
+  --llm-subprocess-cmd claude
+
+python run_agent.py --job agent-prompts/migrate-action-history.yaml \
+  --llm-subprocess-cmd codex
+
+# Agent-driven full workflow with Claude Code CLI
+python run_agent.py --list-features --json
+python run_agent.py --new-job --feature ActionHistory --target snake_case \
+  --non-interactive --json
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --llm-subprocess-cmd claude
+python run_agent.py --approve-plan \
+  --job agent-prompts/migrate-actionhistory-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --mode full --llm-subprocess-cmd claude
+```
+
+**Or set it in the job YAML** (recommended for Cursor/Windsurf so the agent doesn't need extra flags):
+
+```yaml
+llm:
+  provider:        subprocess
+  subprocess_cmd:  claude      # or: codex
+```
+
+#### Human interactive use
+
+```bash
+# Force the interactive provider picker (shows all detected options)
+python run_agent.py --job agent-prompts/migrate-action-history.yaml --select-llm
+
+# Explicitly pick Claude Code CLI without the picker
+python run_agent.py --job agent-prompts/migrate-action-history.yaml \
+  --llm-subprocess-cmd claude
+```
+
+#### Environment variables
+
+```bash
+# Use a specific CLI tool for all runs (no flag needed)
+set LLM_SUBPROCESS_CMD=claude          # Windows CMD
+export LLM_SUBPROCESS_CMD=claude       # macOS/Linux
+
+# Pass extra arguments to the CLI
+set LLM_SUBPROCESS_ARGS=--verbose      # forwarded verbatim
+```
 
 ### LLM failure behaviour
 
@@ -308,6 +393,8 @@ auto-loaded by each IDE:
 | `--approve-plan --job FILE` | Write `.approved` marker (no TTY needed) |
 | `--revise-plan --job FILE --feedback "..."` | Re-generate plan with LLM feedback |
 | `--mode <scope\|plan\|full>` | Override `pipeline.mode` at CLI |
+| `--llm-subprocess-cmd CMD` | Use Claude Code CLI / Codex CLI as LLM backend |
+| `--select-llm` | Interactive provider picker (human TTY only — not for agents) |
 | `--json` | Machine-readable output throughout |
 
 See [Agent Interactive Mode](docs/Agent-Interactive-Mode.md) for the complete guide.
@@ -367,13 +454,14 @@ ai-migration-tool/
 │   ├── approval_gate.py             # Detects .approved marker for agent approval
 │   └── llm/
 │       ├── base.py                  # LLMMessage, LLMResponse, LLMConfig, BaseLLMProvider
-│       ├── registry.py              # LLMRouter — provider factory + auto-detect
+│       ├── registry.py              # LLMRouter — provider factory, auto-detect, interactive picker
 │       └── providers/
 │           ├── anthropic_provider.py
 │           ├── openai_provider.py
 │           ├── openai_compat_provider.py
 │           ├── ollama_provider.py
-│           └── llamacpp_provider.py
+│           ├── llamacpp_provider.py
+│           └── subprocess_provider.py   # Claude Code CLI, Codex CLI, any CLI tool
 │
 ├── prompts/                         # LLM prompt text files (edit freely)
 │   ├── plan_system.txt              # PlanAgent — simpler_grants

@@ -107,13 +107,16 @@ def build_llm_router(args: argparse.Namespace):
     Returns None if --no-llm is set.
 
     Selection logic:
-      1. --no-llm flag            → None (template-only mode)
-      2. --llm-provider / env var → use that provider directly
-      3. --select-llm flag        → always show interactive picker
+      1. --no-llm flag                         → None (template-only mode)
+      2. --llm-provider / env var (no --select-llm)
+                                               → use that provider directly
+      3. --select-llm + TTY + ≥2 detected      → show interactive picker
+      3b.--select-llm + TTY + 1 detected       → auto-select, print confirmation
+      3c.--select-llm + non-TTY                → warn, fall through to auto-detect
       4. interactive TTY, no explicit provider, ≥2 detected
-                                  → show interactive picker
-      5. single provider detected → auto-select silently
-      6. nothing found            → None with a warning
+                                               → auto-trigger interactive picker
+      5. single provider detected              → auto-select silently
+      6. nothing found                         → None with a warning
     """
     if getattr(args, "no_llm", False):
         return None
@@ -143,7 +146,32 @@ def build_llm_router(args: argparse.Namespace):
         # --- Interactive selection path ---
         options = probe_available_providers()
 
-        if force_select or (
+        # --select-llm requires an interactive TTY; warn and fall through if not.
+        if force_select and not sys.stdin.isatty():
+            logger.warning(
+                "--select-llm was requested but stdin is not an interactive TTY "
+                "(running in a pipe or non-interactive session). "
+                "Use --llm-subprocess-cmd <cmd> to pick a provider non-interactively. "
+                "Falling back to auto-detection."
+            )
+            force_select = False  # drop to auto-select logic below
+
+        if force_select:
+            # Interactive picker — user explicitly asked for it and we have a TTY.
+            if len(options) == 1:
+                # Only one provider available; skip the full menu and auto-select,
+                # but still print a confirmation so the user knows what was chosen.
+                cfg = options[0]["config"]
+                print(f"\n  [--select-llm] Only 1 provider detected — auto-selecting:")
+                print(f"    {options[0]['label']}\n")
+                return LLMRouter.from_config(cfg)
+            chosen_config = select_llm_interactively(options)
+            if chosen_config is None:
+                return None
+            return LLMRouter.from_config(chosen_config)
+
+        # Auto-trigger picker: interactive TTY + no explicit provider + multiple options
+        if (
             not explicit_provider
             and not explicit_subprocess
             and sys.stdin.isatty()
@@ -898,7 +926,9 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         print("  All steps were completed in a previous run.")
         print("  Artefacts (plan, dependency graph, conversion log) are unchanged.")
         print()
-        print("  To force a fresh run:  python main.py ... --force")
+        print("  To force a fresh run:")
+        print(f"    python run_agent.py --job <job-file> --force")
+        print(f"    python main.py --feature-root ... --feature-name ... --force")
         print("  To view the plan:      check plans/ for this run_id")
         print()
         return 0

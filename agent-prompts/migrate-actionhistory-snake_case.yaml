@@ -39,7 +39,7 @@ pipeline:
   dry_run: false
 
   # true = skip human approval (TESTING ONLY)
-  auto_approve: true
+  auto_approve: false
 
   # true = ignore completed-run cache, re-run from scratch
   force: false
@@ -52,7 +52,7 @@ llm:
   model: "llama3.2"
 
   # true = template-only mode, no API key required
-  no_llm: true
+  no_llm: false
 
   # Optional -- only set if needed
   base_url: null

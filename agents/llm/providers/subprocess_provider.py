@@ -23,9 +23,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 from typing import Optional
+
+# Regex that matches ${VAR_NAME} placeholders for env-var expansion
+_ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
 
 from agents.llm.base import (
     BaseLLMProvider,
@@ -47,9 +51,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _CLI_PROFILES: dict[str, dict] = {
     "claude": {
-        "args":       ["--print"],
+        # --print                      : non-interactive, print response then exit
+        # --dangerously-skip-permissions: bypass interactive "Allow?" prompts that
+        #   cause exit code 1 when running headlessly inside a subprocess
+        # --no-session-persistence     : don't write session files between calls
+        "args":       ["--print", "--dangerously-skip-permissions", "--no-session-persistence"],
         "stdin":      True,
-        "model_flag": None,   # Claude Code uses its own model selection
+        "model_flag": "--model",   # supports --model <name> for optional override
     },
     "codex": {
         "args":       ["--quiet"],
@@ -111,6 +119,16 @@ class SubprocessProvider(BaseLLMProvider):
         extra_env = os.environ.get("LLM_SUBPROCESS_ARGS", "")
         self._extra_args: list[str] = extra_env.split() if extra_env else []
 
+        if os.environ.get("CLAUDECODE") and self._cmd_name == "claude":
+            logger.warning(
+                "SubprocessProvider: CLAUDECODE env var detected (running inside a "
+                "Claude Code session). CLAUDECODE will be unset for the subprocess, "
+                "but 'claude --print' may still hang or be killed by the host session. "
+                "If LLM calls fall back to template-only mode, run the pipeline from "
+                "a standalone terminal outside of Claude Code, or set ANTHROPIC_API_KEY "
+                "and use provider=anthropic instead."
+            )
+
         logger.info(
             "SubprocessProvider ready: command=%r resolved=%s profile=%s",
             cmd, path, self._cmd_name,
@@ -152,6 +170,28 @@ class SubprocessProvider(BaseLLMProvider):
             cmd_parts[0], use_stdin, len(prompt),
         )
 
+        # Build a sanitised subprocess environment.
+        # 1. Start from the current process env, stripping CLAUDECODE so that
+        #    `claude --print` does not refuse to start inside a Claude Code session
+        #    (Cursor, Windsurf, etc. set this var; nested sessions exit with code 1).
+        # 2. Overlay any credentials / vars from config.subprocess_env.
+        #    Values may use ${VAR} placeholders that expand from the host env.
+        sub_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+        if self.config.subprocess_env:
+            for env_key, env_val in self.config.subprocess_env.items():
+                expanded = _ENV_VAR_RE.sub(
+                    lambda m: os.environ.get(m.group(1), m.group(0)),
+                    str(env_val),
+                )
+                sub_env[env_key] = expanded
+                logger.debug(
+                    "SubprocessProvider: injecting env var %s=%r",
+                    env_key,
+                    expanded if "key" not in env_key.lower() and "pass" not in env_key.lower()
+                    else "***",
+                )
+
         try:
             result = subprocess.run(
                 cmd_parts,
@@ -161,6 +201,7 @@ class SubprocessProvider(BaseLLMProvider):
                 encoding="utf-8",
                 errors="replace",
                 timeout=self.config.timeout_seconds,
+                env=sub_env,
             )
         except subprocess.TimeoutExpired as exc:
             raise LLMProviderError(
@@ -173,15 +214,19 @@ class SubprocessProvider(BaseLLMProvider):
             ) from exc
 
         if result.returncode != 0:
-            stderr_snippet = (result.stderr or "")[:400]
+            stderr_snippet = (result.stderr or "").strip()[:400]
+            stdout_snippet = (result.stdout or "").strip()[:400]
+            # Many CLIs (including claude) write error messages to stdout, not
+            # stderr.  Include both so the real error is always visible in logs.
+            detail = stderr_snippet or stdout_snippet or "(no output from subprocess)"
             raise LLMProviderError(
                 f"Subprocess exited with code {result.returncode}. "
-                f"stderr: {stderr_snippet}"
+                f"{'stderr' if stderr_snippet else 'stdout'}: {detail}"
             )
 
         text = result.stdout.strip()
         if not text:
-            stderr_snippet = (result.stderr or "")[:400]
+            stderr_snippet = (result.stderr or "").strip()[:400]
             raise LLMProviderError(
                 f"Subprocess produced no output. stderr: {stderr_snippet}"
             )
