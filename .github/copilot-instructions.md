@@ -17,7 +17,7 @@ python run_agent.py --list-jobs
 
 ### Run a job
 ```bash
-python run_agent.py --job agent-prompts/migrate-action-history.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-modern.yaml
 ```
 
 ### Common override flags

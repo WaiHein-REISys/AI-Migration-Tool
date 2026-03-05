@@ -43,7 +43,7 @@ The wizard walks through six sections of questions:
 Load a JSON config as starting values; the wizard still prompts for confirmation:
 
 ```bash
-python run_agent.py --setup --config agent-prompts/wizard-myapp.json
+python run_agent.py --setup --config agent-prompts/wizard-configs/example-wizard-config.json
 ```
 
 ### Non-interactive / agent mode
@@ -52,7 +52,7 @@ Fully scripted — no prompts, no TTY required:
 
 ```bash
 python run_agent.py --setup \
-  --config agent-prompts/wizard-myapp.json \
+  --config agent-prompts/wizard-configs/example-wizard-config.json \
   --non-interactive
 ```
 
@@ -94,9 +94,9 @@ For a new target named `my_nextjs_flask`:
 
 | Artefact | Path | Purpose |
 |---|---|---|
-| Plan prompt | `prompts/plan_system_my_nextjs_flask.txt` | LLM instructions for plan generation |
-| Conversion prompt | `prompts/conversion_system_my_nextjs_flask.txt` | LLM instructions for code conversion |
-| Stack reference | `prompts/conversion_target_stack_my_nextjs_flask.txt` | Target stack patterns injected at runtime |
+| Plan prompt | `prompts/my_nextjs_flask/plan_system.txt` | LLM instructions for plan generation |
+| Conversion prompt | `prompts/my_nextjs_flask/conversion_system.txt` | LLM instructions for code conversion |
+| Stack reference | `prompts/my_nextjs_flask/conversion_target_stack.txt` | Target stack patterns injected at runtime |
 | Job template | `agent-prompts/_template_my_nextjs_flask.yaml` | Ready-to-fill migration job template |
 | Optional populated job | `agent-prompts/migrate-<feature>-my_nextjs_flask.yaml` | Auto-generated if `job.feature_name` + `job.feature_root` are provided in setup config |
 | Skillset entries | `config/skillset-config.json` | `target_stack_*` + `project_structure_*` blocks |
@@ -182,7 +182,7 @@ If omitted, the wizard uses auto-detected defaults.
 - `job.mode` defaults to `plan` when omitted.
 - `job.output_filename` defaults to `migrate-<feature>-<target_id>.yaml` when omitted.
 
-See `agent-prompts/wizard-myapp.json` for a concrete filled-in example.
+See `agent-prompts/wizard-configs/example-wizard-config.json` for a concrete filled-in example.
 
 ---
 
@@ -208,9 +208,9 @@ editing the JSON config before passing it to `--config`.
 
 ```bash
 # 1. Review the generated prompts — edit for fine-tuning
-#    prompts/plan_system_<id>.txt
-#    prompts/conversion_system_<id>.txt
-#    prompts/conversion_target_stack_<id>.txt
+#    prompts/<id>/plan_system.txt
+#    prompts/<id>/conversion_system.txt
+#    prompts/<id>/conversion_target_stack.txt
 
 # 2. Create a migration job
 cp agent-prompts/_template_<id>.yaml agent-prompts/migrate-MyFeature-<id>.yaml

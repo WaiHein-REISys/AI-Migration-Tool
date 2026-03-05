@@ -111,16 +111,16 @@ In `config/skillset-config.json`, add two blocks:
 
 ```bash
 # Start from the closest existing target
-cp prompts/plan_system_snake_case.txt prompts/plan_system_my_target.txt
-cp prompts/conversion_system_snake_case.txt prompts/conversion_system_my_target.txt
-cp prompts/conversion_target_stack_snake_case.txt prompts/conversion_target_stack_my_target.txt
+cp prompts/snake_case/plan_system.txt prompts/my_target/plan_system.txt
+cp prompts/snake_case/conversion_system.txt prompts/my_target/conversion_system.txt
+cp prompts/snake_case/conversion_target_stack.txt prompts/my_target/conversion_target_stack.txt
 
 # Edit each file to match the new stack
 ```
 
 At minimum, update:
 - Source/target stack names in the plan prompt
-- Target stack description in `conversion_target_stack_my_target.txt`
+- Target stack description in `my_target/conversion_target_stack.txt`
 - Framework-specific conventions in the conversion prompt
 
 #### 3. Register in wizard-registry.json
@@ -137,9 +137,9 @@ At minimum, update:
       "backend_pair": "ASP.NET Core MVC -> FastAPI",
       "created_at": "2026-02-27T00:00:00+00:00",
       "prompt_files": {
-        "plan_system": "plan_system_my_target.txt",
-        "conversion_system": "conversion_system_my_target.txt",
-        "target_stack": "conversion_target_stack_my_target.txt"
+        "plan_system": "my_target/plan_system.txt",
+        "conversion_system": "my_target/conversion_system.txt",
+        "target_stack": "my_target/conversion_target_stack.txt"
       },
       "job_template": "_template_my_target.yaml"
     }
@@ -239,7 +239,7 @@ Prompts are plain text files — edit them directly:
 
 ```bash
 # Add a new constraint to the snake_case plan prompt
-code prompts/plan_system_snake_case.txt
+code prompts/snake_case/plan_system.txt
 ```
 
 Changes take effect immediately on the next pipeline run.

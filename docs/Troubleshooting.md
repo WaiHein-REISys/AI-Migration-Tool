@@ -173,7 +173,7 @@ manual resolution — the human developer must:
 
 ---
 
-### `FileNotFoundError: prompts/plan_system_my_target.txt`
+### `FileNotFoundError: prompts/my_target/plan_system.txt`
 
 **Cause:** The target is registered in `wizard-registry.json` but the prompt file
 doesn't exist (e.g. file was deleted or target was registered manually without
@@ -181,7 +181,7 @@ creating prompt files).
 
 **Fix:** Create the missing prompt file:
 ```bash
-cp prompts/plan_system_snake_case.txt prompts/plan_system_my_target.txt
+cp prompts/snake_case/plan_system.txt prompts/my_target/plan_system.txt
 # Edit to match your target stack
 ```
 

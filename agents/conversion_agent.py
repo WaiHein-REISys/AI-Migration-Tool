@@ -410,6 +410,11 @@ class ConversionAgent:
             )
             result = response.text.strip()
 
+            # Strip markdown code fences — the LLM sometimes wraps output in
+            # ```python ... ``` despite being told not to.  Stripping here
+            # prevents a SyntaxError when the file is written to disk.
+            result = self._strip_code_fences(result)
+
             # Detect AMBIGUOUS response from LLM
             if result.upper().startswith("AMBIGUOUS:"):
                 raise AmbiguityException(result[len("AMBIGUOUS:"):].strip())
@@ -431,6 +436,63 @@ class ConversionAgent:
                 error=exc,
                 fallback_fn=_template_fallback,
             )
+
+    # ------------------------------------------------------------------
+    # Post-processing helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _strip_code_fences(text: str) -> str:
+        """
+        Post-process LLM output to extract clean source code.
+
+        Two passes are applied in order:
+
+        Pass 1 — Markdown code fence extraction:
+          If the output is wrapped in a markdown code fence (```python...```),
+          extract the inner code.  Handles:
+            - Preamble prose before the first fence ("Here is the code:\n```...")
+            - ```python / ```ts / ``` variants
+            - Trailing text after the closing fence (ignored)
+
+        Pass 2 — Leading prose stripping:
+          Some LLMs (e.g. codex exec) emit chain-of-thought reasoning as plain
+          text lines BEFORE the first import/from/#.  These prose lines make the
+          file invalid Python.  This pass finds the first line that looks like
+          valid Python and discards everything above it.
+
+          A line is treated as the start of code when it begins with:
+            import / from / # / \"\"\" / ''' / def / class / @
+
+        If neither pass changes the text, the original is returned unchanged.
+        """
+        # Pass 1: extract from markdown code fences
+        match = re.search(r"```[^\n]*\n(.*?)```", text, re.DOTALL)
+        if match:
+            extracted = match.group(1).strip()
+            if extracted:
+                text = extracted  # continue to pass 2 in case fenced block also has prose
+
+        # Pass 2: strip leading prose before the first code line
+        _CODE_STARTERS = (
+            "import ",
+            "from ",
+            "#",
+            '"""',
+            "'''",
+            "def ",
+            "class ",
+            "@",
+        )
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if any(stripped.startswith(s) for s in _CODE_STARTERS):
+                if i > 0:
+                    return "\n".join(lines[i:])
+                break  # already starts at a code line — no change needed
+
+        return text
 
     # ------------------------------------------------------------------
     # Boundary validation (RULE-005)

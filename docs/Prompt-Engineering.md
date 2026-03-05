@@ -22,7 +22,7 @@ Prompts are loaded by `prompts/__init__.py::load_prompt()`:
 ```python
 from prompts import load_prompt
 
-text = load_prompt("plan_system_snake_case.txt")
+text = load_prompt("snake_case/plan_system.txt")
 ```
 
 The loader:
@@ -50,9 +50,9 @@ The loader:
 | File | Target |
 |---|---|
 | `plan_system.txt` | `simpler_grants` |
-| `plan_system_hrsa_pprs.txt` | `hrsa_pprs` |
-| `plan_system_snake_case.txt` | `snake_case` |
-| `plan_system_<id>.txt` | wizard-generated |
+| `hrsa_pprs/plan_system.txt` | `hrsa_pprs` |
+| `snake_case/plan_system.txt` | `snake_case` |
+| `<id>/plan_system.txt` | wizard-generated |
 
 ---
 
@@ -64,7 +64,7 @@ The loader:
 | Token | Filled with |
 |---|---|
 | `{rules_text}` | All guardrail rules from `config/rules-config.json`, formatted as a numbered list |
-| `{target_stack_summary}` | Contents of `conversion_target_stack_<target>.txt` |
+| `{target_stack_summary}` | Contents of `<target>/conversion_target_stack.txt` |
 
 **Key sections to tune:**
 - **MANDATORY GUARDRAILS** — The `{rules_text}` block enforces RULE-001 through RULE-010
@@ -75,8 +75,8 @@ The loader:
 | File | Target |
 |---|---|
 | `conversion_system.txt` | `simpler_grants` |
-| `conversion_system_hrsa_pprs.txt` | `hrsa_pprs` |
-| `conversion_system_snake_case.txt` | `snake_case` |
+| `hrsa_pprs/conversion_system.txt` | `hrsa_pprs` |
+| `snake_case/conversion_system.txt` | `snake_case` |
 | `conversion_system_<id>.txt` | wizard-generated |
 
 ---
@@ -96,8 +96,8 @@ conversion system prompt via `{target_stack_summary}`.
 | File | Target |
 |---|---|
 | `conversion_target_stack.txt` | `simpler_grants` |
-| `conversion_target_stack_hrsa_pprs.txt` | `hrsa_pprs` |
-| `conversion_target_stack_snake_case.txt` | `snake_case` |
+| `hrsa_pprs/conversion_target_stack.txt` | `hrsa_pprs` |
+| `snake_case/conversion_target_stack.txt` | `snake_case` |
 | `conversion_target_stack_<id>.txt` | wizard-generated |
 
 ---
@@ -122,7 +122,7 @@ Not used when the LLM is active.
 **Example: Tighten the plan rules for a specific target**
 ```bash
 # Edit the snake_case plan system prompt
-code prompts/plan_system_snake_case.txt
+code prompts/snake_case/plan_system.txt
 # Add a rule:
 # 8. All repository methods MUST use snake_case identifiers only.
 ```
@@ -130,7 +130,7 @@ code prompts/plan_system_snake_case.txt
 **Example: Update the target stack reference**
 ```bash
 # The stack reference is injected into conversion prompts
-code prompts/conversion_target_stack_snake_case.txt
+code prompts/snake_case/conversion_target_stack.txt
 # Add the new repositories_dir pattern your team uses
 ```
 
@@ -183,7 +183,7 @@ The **Setup Wizard** generates initial prompts automatically. To create them man
 
 1. Copy the closest existing prompt file:
    ```bash
-   cp prompts/plan_system_snake_case.txt prompts/plan_system_my_target.txt
+   cp prompts/snake_case/plan_system.txt prompts/my_target/plan_system.txt
    ```
 2. Edit the source/target stack names and any target-specific conventions
 3. Register the new target in `config/wizard-registry.json` and `config/skillset-config.json`

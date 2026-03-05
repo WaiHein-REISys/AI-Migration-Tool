@@ -398,8 +398,17 @@ class LLMRouter:
         if getattr(args, "llm_timeout", None) is not None:
             config.timeout_seconds = int(args.llm_timeout)
         if getattr(args, "llm_subprocess_cmd", None):
+            new_cmd = args.llm_subprocess_cmd
+            # When the command changes (e.g. auto-detected "claude" → explicit
+            # "codex"), clear the stale placeholder model name so the subprocess
+            # uses its own default model.  Real model identifiers like "o3" or
+            # "claude-opus-4-5" never match a bare CLI name, so they are kept.
+            if (config.model and config.subprocess_cmd
+                    and config.model == config.subprocess_cmd
+                    and config.subprocess_cmd != new_cmd):
+                config.model = new_cmd   # replace old placeholder with new one
             config.provider        = PROVIDER_SUBPROCESS
-            config.subprocess_cmd  = args.llm_subprocess_cmd
+            config.subprocess_cmd  = new_cmd
         if getattr(args, "llm_subprocess_env", None):
             config.subprocess_env  = dict(args.llm_subprocess_env)
 

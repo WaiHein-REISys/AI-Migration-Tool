@@ -32,6 +32,18 @@ and trigger conversions entirely without human TTY interaction.
 
 Full technical and guidelines documentation is in [`docs/`](docs/):
 
+### User Guides
+
+Start here if you are new to the tool or setting it up for your IDE or CI pipeline.
+
+| Guide | Who it's for |
+|---|---|
+| [User Guide — Agent Chat](docs/User-Guide-Agent-Chat.md) | **Cursor Agent, Windsurf Cascade, GitHub Copilot** — fully autonomous, non-interactive workflow; 5-step lifecycle, `--json` output, `.approved` marker, plan revision, error handling |
+| [User Guide — Terminal Run](docs/User-Guide-Terminal.md) | **Developers running commands interactively** — step-by-step terminal workflow, `--select-llm`, `--dry-run`, `--verbose`, plan review and approval, troubleshooting |
+| [User Guide — LLM Run](docs/User-Guide-LLM-Run.md) | **Configuring LLM backends** — all providers (Anthropic, OpenAI, Ollama, LM Studio, llama.cpp, Claude CLI, Codex CLI, Gemini CLI), YAML config, cost/latency table, no-LLM mode |
+
+### Technical Reference
+
 | Page | Contents |
 |---|---|
 | [Architecture](docs/Architecture.md) | Pipeline data-flow, agent responsibilities, module map |
@@ -108,7 +120,7 @@ LLM_PROVIDER (explicit) → LLAMACPP_MODEL_PATH → OLLAMA_MODEL → LLM_BASE_UR
 providers are detected, use `--select-llm` to choose:
 
 ```bash
-python run_agent.py --job agent-prompts/migrate-action-history.yaml --select-llm
+python run_agent.py --job agent-prompts/migrate-actionhistory-modern.yaml --select-llm
 ```
 
 ### 3b. Configure a custom target (optional)
@@ -136,12 +148,12 @@ See [Setup Wizard](docs/Setup-Wizard.md) for the full guide.
 python run_agent.py --list-jobs
 
 # 2. Run a migration job (generates plan only by default)
-python run_agent.py --job agent-prompts/migrate-action-history.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-modern.yaml
 
 # 3. Review the plan in plans/<feature>-plan-<ts>.md
 
 # 4. Run full conversion (edit mode: full in the YAML, then re-run)
-python run_agent.py --job agent-prompts/migrate-action-history.yaml --mode full
+python run_agent.py --job agent-prompts/migrate-actionhistory-modern.yaml --mode full
 ```
 
 ### Agent-driven workflow (Cursor / Windsurf / Copilot / AntiGravity)
@@ -251,10 +263,10 @@ Agents run without a TTY, so the interactive picker never fires. Use the explici
 
 ```bash
 # Via CLI flag (works with any run_agent.py command)
-python run_agent.py --job agent-prompts/migrate-action-history.yaml \
+python run_agent.py --job agent-prompts/migrate-actionhistory-modern.yaml \
   --llm-subprocess-cmd claude
 
-python run_agent.py --job agent-prompts/migrate-action-history.yaml \
+python run_agent.py --job agent-prompts/migrate-actionhistory-modern.yaml \
   --llm-subprocess-cmd codex
 
 # Agent-driven full workflow with Claude Code CLI
@@ -281,10 +293,10 @@ llm:
 
 ```bash
 # Force the interactive provider picker (shows all detected options)
-python run_agent.py --job agent-prompts/migrate-action-history.yaml --select-llm
+python run_agent.py --job agent-prompts/migrate-actionhistory-modern.yaml --select-llm
 
 # Explicitly pick Claude Code CLI without the picker
-python run_agent.py --job agent-prompts/migrate-action-history.yaml \
+python run_agent.py --job agent-prompts/migrate-actionhistory-modern.yaml \
   --llm-subprocess-cmd claude
 ```
 
@@ -361,7 +373,7 @@ Interactive setup now also supports optional starter-job creation:
 - Wizard writes a populated migration job file with `<FeatureName>` replaced
 
 For each new target `<id>`, the wizard creates:
-- `prompts/plan_system_<id>.txt`
+- `prompts/<id>/plan_system.txt`
 - `prompts/conversion_system_<id>.txt`
 - `prompts/conversion_target_stack_<id>.txt`
 - `agent-prompts/_template_<id>.yaml`
@@ -410,7 +422,10 @@ ai-migration-tool/
 ├── setup_wizard.py                  # Setup wizard CLI entry point
 ├── requirements.txt
 │
-├── docs/                            # Technical documentation & wiki pages
+├── docs/                            # Documentation & user guides
+│   ├── User-Guide-Agent-Chat.md     # ← User guide: Cursor Agent / Windsurf Cascade
+│   ├── User-Guide-Terminal.md       # ← User guide: interactive terminal workflow
+│   ├── User-Guide-LLM-Run.md        # ← User guide: all LLM provider configurations
 │   ├── Architecture.md
 │   ├── Pipeline-Stages.md
 │   ├── Agent-Interactive-Mode.md
@@ -436,10 +451,11 @@ ai-migration-tool/
 │   ├── _template_modern.yaml        # modern target template
 │   ├── _template_snake_case.yaml    # snake_case target template
 │   ├── _template_<id>.yaml          # Wizard-generated custom template
-│   ├── migrate-action-history.yaml
-│   ├── migrate-action-history-hrsa.yaml
-│   ├── example-wizard-config.json   # Sample non-interactive wizard answers
-│   └── wizard-myapp.json            # Concrete custom target wizard example
+│   ├── migrate-actionhistory-modern.yaml
+│   ├── migrate-actionhistory-hrsa_pprs.yaml
+│   ├── migrate-<feature>-<target>.yaml  # One file per migration job
+│   └── wizard-configs/              # Wizard JSON config files (non-interactive setup)
+│       └── example-wizard-config.json
 │
 ├── .cursor/rules.mdc                # Cursor agent rules
 ├── .github/copilot-instructions.md  # GitHub Copilot workspace instructions
@@ -464,13 +480,15 @@ ai-migration-tool/
 │           └── subprocess_provider.py   # Claude Code CLI, Codex CLI, any CLI tool
 │
 ├── prompts/                         # LLM prompt text files (edit freely)
-│   ├── plan_system.txt              # PlanAgent — simpler_grants
-│   ├── plan_system_hrsa_pprs.txt    # PlanAgent — hrsa_pprs
-│   ├── plan_system_snake_case.txt   # PlanAgent — snake_case
-│   ├── plan_system_<id>.txt         # Wizard-generated
-│   ├── plan_document_template.md    # Shared scaffold (no-LLM mode)
-│   ├── conversion_system*.txt       # ConversionAgent prompts (per-target)
-│   └── conversion_target_stack*.txt # Stack references (per-target)
+│   ├── plan_system.txt              # Default PlanAgent prompt (fallback)
+│   ├── conversion_system.txt        # Default ConversionAgent prompt (fallback)
+│   ├── conversion_target_stack.txt  # Default stack reference (fallback)
+│   ├── plan_document_template.md    # Shared scaffold (no-LLM / template mode)
+│   ├── modern/                      # modern target — plan + conversion + stack prompts
+│   ├── snake_case/                  # snake_case target
+│   ├── hrsa_pprs/                   # hrsa_pprs target
+│   ├── hrsa_simpler_pprs_repo/      # hrsa_simpler_pprs_repo target
+│   └── <target_id>/                 # Wizard-generated target subdirectory
 │
 ├── config/
 │   ├── skillset-config.json         # Stack definitions + component mappings

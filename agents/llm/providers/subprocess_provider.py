@@ -5,7 +5,8 @@ Delegates LLM calls to an installed CLI tool by spawning a subprocess.
 
 Supported tools (auto-detected by name):
   claude   — Anthropic Claude Code CLI  (claude --print)
-  codex    — OpenAI Codex CLI           (codex --quiet)
+  codex    — OpenAI Codex CLI           (codex exec - --json ...)
+  gemini   — Google Gemini CLI          (gemini -p "" --yolo -o json)
 
 Any other command is invoked with the combined system+messages prompt
 written to stdin (generic fallback).
@@ -21,6 +22,7 @@ Optional env vars:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -60,9 +62,40 @@ _CLI_PROFILES: dict[str, dict] = {
         "model_flag": "--model",   # supports --model <name> for optional override
     },
     "codex": {
-        "args":       ["--quiet"],
-        "stdin":      False,
-        "model_flag": "--model",
+        # exec                            — non-interactive subcommand
+        # -                               — read prompt from stdin
+        # --ephemeral                     — don't write session files between calls
+        # --dangerously-bypass-approvals-and-sandbox
+        #                                 — skip interactive "Allow?" prompts (headless)
+        # -s read-only                    — sandbox: no filesystem writes by the agent
+        # -c reasoning_effort="medium"    — use medium reasoning for speed (~15-30 s/call);
+        #   the default "high" effort can take 3+ min per call.  For max quality,
+        #   override with model: "o3" in the job YAML (high effort + best model).
+        # --json                          — emit JSONL events; response extracted via
+        #                                   output_format="codex_jsonl" (see _extract_text)
+        "args":         ["exec", "--ephemeral",
+                         "--dangerously-bypass-approvals-and-sandbox",
+                         "-s", "read-only",
+                         "-c", 'reasoning_effort="medium"',
+                         "--json", "-"],
+        "stdin":        True,
+        "model_flag":   "-m",
+        "output_format": "codex_jsonl",  # tells _extract_text to parse JSONL
+    },
+    "gemini": {
+        # -p ""              — trigger non-interactive (headless) mode; the empty
+        #                      string is appended to stdin content as the prompt
+        # --yolo             — auto-approve all tool calls (skip interactive prompts)
+        # -o json            — emit a single JSON object:
+        #                        {"session_id": "...", "response": "...", "stats": {...}}
+        #                      response text and token counts extracted via
+        #                      output_format="gemini_json" (see _extract_text /
+        #                      _parse_gemini_usage)
+        # stderr             — YOLO/credential messages go to stderr; stdout is clean JSON
+        "args":         ["-p", "", "--yolo", "-o", "json"],
+        "stdin":        True,
+        "model_flag":   "-m",
+        "output_format": "gemini_json",  # tells _extract_text to parse the JSON object
     },
 }
 
@@ -155,10 +188,24 @@ class SubprocessProvider(BaseLLMProvider):
         cmd_parts += list(self._profile.get("args", []))
         cmd_parts += self._extra_args
 
-        # Attach model flag if the CLI supports it and a model is set
-        model_flag = self._profile.get("model_flag")
-        if model_flag and self.config.model:
-            cmd_parts += [model_flag, self.config.model]
+        # Attach model flag only when the CLI supports it AND the model is a
+        # real model identifier — not a bare CLI placeholder name.
+        #
+        # Auto-detection in registry.py sets model=<cmd_name> as a placeholder
+        # (e.g. model="claude" when claude is on PATH, model="codex" when codex
+        # is on PATH).  If the YAML then overrides subprocess_cmd to a different
+        # CLI (e.g. cmd changed to "codex" but model still carries "claude"),
+        # we must NOT pass "--model claude" to codex — that is an Anthropic model
+        # name and codex will reject it.
+        #
+        # Rule: skip --model if model_val matches ANY known CLI placeholder name.
+        # A real model name (e.g. "o3", "gpt-4o", "claude-opus-4-5") will never
+        # equal a bare CLI command name, so this guard is safe and general.
+        model_flag      = self._profile.get("model_flag")
+        model_val       = self.config.model or ""
+        _cli_placeholders = frozenset(_CLI_PROFILES)   # {"claude", "codex", "gemini"}
+        if model_flag and model_val and model_val not in _cli_placeholders:
+            cmd_parts += [model_flag, model_val]
 
         use_stdin = bool(self._profile.get("stdin", True))
         if not use_stdin:
@@ -224,24 +271,134 @@ class SubprocessProvider(BaseLLMProvider):
                 f"{'stderr' if stderr_snippet else 'stdout'}: {detail}"
             )
 
-        text = result.stdout.strip()
-        if not text:
+        raw_output = result.stdout.strip()
+        if not raw_output:
             stderr_snippet = (result.stderr or "").strip()[:400]
             raise LLMProviderError(
                 f"Subprocess produced no output. stderr: {stderr_snippet}"
             )
 
+        # Post-process output according to the profile's declared format.
+        output_format = self._profile.get("output_format", "plain")
+        text = self._extract_text(raw_output, output_format)
+        if not text:
+            raise LLMProviderError(
+                f"Subprocess output could not be parsed (format={output_format!r}). "
+                f"Raw output (first 400 chars): {raw_output[:400]}"
+            )
+
+        # Count tokens where the format reports them inline.
+        in_tokens  = 0
+        out_tokens = 0
+        if output_format == "codex_jsonl":
+            in_tokens, out_tokens = self._parse_codex_usage(raw_output)
+        elif output_format == "gemini_json":
+            in_tokens, out_tokens = self._parse_gemini_usage(raw_output)
+
         return LLMResponse(
             text=text,
             model=self.config.model or self._cmd_name,
             provider=f"subprocess:{self._cmd_name}",
-            input_tokens=0,   # CLI tools don't report token counts
-            output_tokens=0,
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
         )
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_text(raw: str, output_format: str) -> str:
+        """
+        Extract the LLM's response text from raw subprocess output.
+
+        output_format values:
+          "plain"        — raw stdout IS the response (default, e.g. claude --print)
+          "codex_jsonl"  — codex exec --json emits JSONL; parse agent_message events
+          "gemini_json"  — gemini -o json emits a single JSON object; read "response"
+        """
+        if output_format == "codex_jsonl":
+            # Collect all agent_message texts (there is usually one, but concatenate
+            # multiple just in case the agent responds in several turns).
+            parts: list[str] = []
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    event.get("type") == "item.completed"
+                    and event.get("item", {}).get("type") == "agent_message"
+                ):
+                    msg_text = event["item"].get("text", "").strip()
+                    if msg_text:
+                        parts.append(msg_text)
+            return "\n".join(parts)
+
+        if output_format == "gemini_json":
+            # gemini -o json emits a single JSON object:
+            #   {"session_id": "...", "response": "<llm text>", "stats": {...}}
+            # The YOLO/credential warning lines go to stderr; stdout is clean JSON.
+            try:
+                data = json.loads(raw)
+                return data.get("response", "").strip()
+            except json.JSONDecodeError:
+                return ""
+
+        # Default: the whole stdout is the response
+        return raw
+
+    @staticmethod
+    def _parse_codex_usage(jsonl: str) -> tuple[int, int]:
+        """
+        Parse token usage from codex --json JSONL output.
+        Returns (input_tokens, output_tokens).
+        """
+        for line in reversed(jsonl.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "turn.completed":
+                usage = event.get("usage", {})
+                return (
+                    usage.get("input_tokens", 0),
+                    usage.get("output_tokens", 0),
+                )
+        return 0, 0
+
+    @staticmethod
+    def _parse_gemini_usage(raw: str) -> tuple[int, int]:
+        """
+        Parse token usage from gemini -o json output.
+
+        The JSON object has:
+          stats.models.<model_name>.tokens.{input, candidates}
+
+        Multiple model entries may appear (e.g. a router model + a generation
+        model).  We sum input/output tokens across all models so the reported
+        count reflects the full request cost.
+
+        Returns (input_tokens, output_tokens).
+        """
+        try:
+            data = json.loads(raw)
+            stats = data.get("stats", {})
+            in_tokens  = 0
+            out_tokens = 0
+            for model_data in stats.get("models", {}).values():
+                tokens = model_data.get("tokens", {})
+                in_tokens  += tokens.get("input",      0)
+                out_tokens += tokens.get("candidates",  0)
+            return in_tokens, out_tokens
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return 0, 0
 
     @staticmethod
     def _build_prompt(system: str, messages: list[LLMMessage]) -> str:

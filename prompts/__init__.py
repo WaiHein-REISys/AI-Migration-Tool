@@ -22,21 +22,29 @@ Usage
 The loader caches each file on first read so repeated calls within a single
 pipeline run are free after the initial disk access.
 
-Prompt file naming convention
-------------------------------
-Target-specific files follow the pattern  ``{default_stem}_{target_id}.txt``:
+Prompt file organisation
+------------------------
+Target-specific files are organised into subdirectories named after the target ID:
 
-    plan_system.txt                     -- default (simpler_grants)
-    plan_system_hrsa_pprs.txt           -- hrsa_pprs target
-    plan_system_snake_case.txt          -- snake_case target
-    conversion_system.txt               -- default (simpler_grants)
-    conversion_system_hrsa_pprs.txt     -- hrsa_pprs target
-    conversion_target_stack.txt         -- default (simpler_grants)
-    conversion_target_stack_hrsa_pprs.txt
-    plan_document_template.md           -- shared scaffold (no-LLM mode, all targets)
+    prompts/
+    ├── plan_system.txt                    -- default fallback (simpler_grants)
+    ├── conversion_system.txt              -- default fallback
+    ├── conversion_target_stack.txt        -- default fallback
+    ├── plan_document_template.md          -- shared scaffold (no-LLM mode, all targets)
+    ├── modern/
+    │   ├── plan_system.txt
+    │   ├── conversion_system.txt
+    │   └── conversion_target_stack.txt
+    ├── snake_case/
+    │   └── ...
+    ├── hrsa_pprs/
+    │   └── ...
+    └── hrsa_simpler_pprs_repo/
+        └── ...
 
-resolve_prompt_filename() uses this convention automatically, so no
-target-to-filename mappings need to be maintained anywhere in the codebase.
+resolve_prompt_filename() resolves files automatically via registry → subdirectory
+convention → default fallback, so no target-to-filename mappings need to be
+maintained anywhere else in the codebase.
 """
 
 import logging
@@ -57,7 +65,9 @@ def load_prompt(filename: str) -> str:
     Parameters
     ----------
     filename : str
-        Bare filename including extension, e.g. ``"plan_system.txt"``.
+        Filename relative to the prompts/ directory, including extension.
+        Supports both flat names (``"plan_system.txt"``) and subdirectory
+        paths (``"modern/plan_system.txt"``).
 
     Returns
     -------
@@ -71,11 +81,14 @@ def load_prompt(filename: str) -> str:
     """
     path = PROMPTS_DIR / filename
     if not path.exists():
-        available = [f.name for f in PROMPTS_DIR.iterdir()
-                     if f.is_file() and f.suffix in {".txt", ".md"}]
+        available = sorted(
+            str(f.relative_to(PROMPTS_DIR))
+            for f in PROMPTS_DIR.rglob("*")
+            if f.is_file() and f.suffix in {".txt", ".md"} and f.name != "README.md"
+        )
         raise FileNotFoundError(
             f"Prompt file not found: {path}\n"
-            f"Available prompts: {sorted(available)}"
+            f"Available prompts: {available}"
         )
     content = path.read_text(encoding="utf-8").rstrip()
     logger.debug("Loaded prompt '%s' (%d chars)", filename, len(content))
@@ -132,18 +145,28 @@ def resolve_prompt_filename(target: str, role: str, default: str) -> str:
     except Exception:
         pass  # registry unavailable — fall through to convention
 
-    # 2. Convention — derive candidate from default filename stem + target
-    # e.g. "plan_system.txt" → "plan_system_snake_case.txt"
+    # 2. Subdirectory convention — prompts/<target_id>/<stem>.txt
+    # e.g. target "modern", default "plan_system.txt" → "modern/plan_system.txt"
     stem = Path(default).stem          # "plan_system"
-    conventional = f"{stem}_{target}.txt"
-    if (PROMPTS_DIR / conventional).exists():
+    subdir_candidate = f"{target}/{stem}.txt"
+    if (PROMPTS_DIR / subdir_candidate).exists():
         logger.debug(
-            "resolve_prompt_filename: convention hit — target=%s role=%s → %s",
-            target, role, conventional,
+            "resolve_prompt_filename: subdir convention hit — target=%s role=%s → %s",
+            target, role, subdir_candidate,
         )
-        return conventional
+        return subdir_candidate
 
-    # 3. Default
+    # 3. Legacy flat convention — {stem}_{target}.txt (kept for backward compatibility)
+    # e.g. "plan_system.txt" → "plan_system_snake_case.txt"
+    flat_candidate = f"{stem}_{target}.txt"
+    if (PROMPTS_DIR / flat_candidate).exists():
+        logger.debug(
+            "resolve_prompt_filename: flat convention hit — target=%s role=%s → %s",
+            target, role, flat_candidate,
+        )
+        return flat_candidate
+
+    # 4. Default
     logger.debug(
         "resolve_prompt_filename: using default — target=%s role=%s → %s",
         target, role, default,
@@ -152,10 +175,13 @@ def resolve_prompt_filename(target: str, role: str, default: str) -> str:
 
 
 def list_prompts() -> list[str]:
-    """Return the names of all prompt files in the prompts/ directory."""
+    """Return relative paths of all prompt files under the prompts/ directory.
+
+    Includes files in target subdirectories (e.g. ``"modern/plan_system.txt"``).
+    """
     return sorted(
-        f.name
-        for f in PROMPTS_DIR.iterdir()
+        str(f.relative_to(PROMPTS_DIR))
+        for f in PROMPTS_DIR.rglob("*")
         if f.is_file() and f.suffix in {".txt", ".md"} and f.name != "README.md"
     )
 

@@ -10,7 +10,7 @@ Usage
     from wizard.writer import WizardWriter
 
     writer = WizardWriter(dry_run=True)
-    writer.write(Path("prompts/plan_system_mytarget.txt"), content)
+    writer.write(Path("prompts/mytarget/plan_system.txt"), content)
     writer.patch_json(Path("config/skillset-config.json"), {"key": "value"})
     writer.summary()
 """

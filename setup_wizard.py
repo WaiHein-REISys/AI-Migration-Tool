@@ -16,10 +16,10 @@ Usage:
 
 What it produces (for a new target named "my_target")
 ------------------------------------------------------
-  prompts/
-      plan_system_my_target.txt             -- LLM plan-generation prompt
-      conversion_system_my_target.txt       -- LLM conversion-agent prompt
-      conversion_target_stack_my_target.txt -- Target stack reference
+  prompts/my_target/
+      plan_system.txt             -- LLM plan-generation prompt
+      conversion_system.txt       -- LLM conversion-agent prompt
+      conversion_target_stack.txt -- Target stack reference
   agent-prompts/
       _template_my_target.yaml             -- Ready-to-fill job template
   config/skillset-config.json

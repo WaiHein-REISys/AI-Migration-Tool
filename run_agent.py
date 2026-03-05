@@ -7,7 +7,7 @@ invoked by AI coding agents (Cursor, Windsurf, Copilot, AntiGravity) without
 requiring the agent to know the full pipeline internals.
 
 ── Run a job ──────────────────────────────────────────────────────────────────
-  python run_agent.py --job agent-prompts/migrate-action-history.yaml
+  python run_agent.py --job agent-prompts/migrate-actionhistory-modern.yaml
   python run_agent.py --job <file> --mode plan          # override mode
   python run_agent.py --job <file> --mode full          # run full conversion
   python run_agent.py --job <file> --dry-run            # log only, no writes
@@ -1000,7 +1000,7 @@ def main() -> int:
         "--job", "-j",
         type=str,
         metavar="PATH",
-        help="Path to a YAML job file (e.g. agent-prompts/migrate-action-history.yaml).",
+        help="Path to a YAML job file (e.g. agent-prompts/migrate-actionhistory-modern.yaml).",
     )
     parser.add_argument(
         "--list-jobs", "-l",
@@ -1216,7 +1216,7 @@ def main() -> int:
         parser.error(
             "Provide a job file with --job, or use --list-jobs / --new-job / --status.\n"
             "Use --setup to configure a new migration target.\n"
-            "Example:  python run_agent.py --job agent-prompts/migrate-action-history.yaml"
+            "Example:  python run_agent.py --job agent-prompts/migrate-actionhistory-modern.yaml"
         )
 
     job_path = Path(args.job)

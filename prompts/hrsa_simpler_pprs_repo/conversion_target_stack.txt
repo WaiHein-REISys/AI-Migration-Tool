@@ -1,0 +1,22 @@
+TARGET STACK: Next.js / Flask
+
+FRONTEND (Next.js / TypeScript / Python):
+  - components_dir: components/
+  - services_dir: services/
+  - component_structure: feature-based folders
+  - styling: CSS modules
+  - barrel_export: index.ts where useful
+  - test_suffix: .test.tsx
+
+BACKEND (Flask):
+  - routes_dir: routes/
+  - services_dir: services/
+  - repositories_dir: repositories/
+  - route_file_pattern: {feature_name}_routes.py
+  - service_file_pattern: {feature_name}_service.py
+  - repository_file_pattern: {feature_name}_repository.py
+  - architecture: Routes -> Services -> Repositories
+
+DATABASE (PostgreSQL):
+  - access_pattern: psycopg2 raw SQL
+  - migration_tool: alembic

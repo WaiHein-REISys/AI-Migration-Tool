@@ -64,10 +64,10 @@ def run_wizard(
 
     Artefacts written
     -----------------
-    prompts/
-        plan_system_<target_id>.txt
-        conversion_system_<target_id>.txt
-        conversion_target_stack_<target_id>.txt
+    prompts/<target_id>/
+        plan_system.txt
+        conversion_system.txt
+        conversion_target_stack.txt
     agent-prompts/
         _template_<target_id>.yaml
     config/
@@ -96,21 +96,22 @@ def run_wizard(
 
     # ------------------------------------------------------------------ #
     # 1. Prompt files                                                      #
+    # Organised into a subdirectory per target: prompts/<target_id>/      #
     # ------------------------------------------------------------------ #
     _print_section("Prompt files")
 
     writer.write(
-        PROMPTS_DIR / f"plan_system_{target_id}.txt",
+        PROMPTS_DIR / target_id / "plan_system.txt",
         generator.generate_plan_system_prompt(answers),
         overwrite=overwrite,
     )
     writer.write(
-        PROMPTS_DIR / f"conversion_system_{target_id}.txt",
+        PROMPTS_DIR / target_id / "conversion_system.txt",
         generator.generate_conversion_system_prompt(answers),
         overwrite=overwrite,
     )
     writer.write(
-        PROMPTS_DIR / f"conversion_target_stack_{target_id}.txt",
+        PROMPTS_DIR / target_id / "conversion_target_stack.txt",
         generator.generate_target_stack_prompt(answers),
         overwrite=overwrite,
     )
@@ -192,9 +193,9 @@ def run_wizard(
         "backend_pair":   f"{source['backend_framework']} -> {target['backend_framework']}",
         "created_at":     answers.get("created_at", datetime.now(timezone.utc).isoformat()),
         "prompt_files": {
-            "plan_system":        f"plan_system_{target_id}.txt",
-            "conversion_system":  f"conversion_system_{target_id}.txt",
-            "target_stack":       f"conversion_target_stack_{target_id}.txt",
+            "plan_system":        f"{target_id}/plan_system.txt",
+            "conversion_system":  f"{target_id}/conversion_system.txt",
+            "target_stack":       f"{target_id}/conversion_target_stack.txt",
         },
         "job_template": f"_template_{target_id}.yaml",
     }
@@ -252,10 +253,10 @@ def _print_next_steps(answers: dict, target_id: str) -> None:
     job_cfg = answers.get("job") or {}
     has_populated_job = bool(job_cfg.get("feature_name") and job_cfg.get("feature_root"))
 
-    print(f"  1. Review the generated prompts in  prompts/")
-    _safe_print(f"       plan_system_{target_id}.txt")
-    _safe_print(f"       conversion_system_{target_id}.txt")
-    _safe_print(f"       conversion_target_stack_{target_id}.txt")
+    print(f"  1. Review the generated prompts in  prompts/{target_id}/")
+    _safe_print(f"       plan_system.txt")
+    _safe_print(f"       conversion_system.txt")
+    _safe_print(f"       conversion_target_stack.txt")
     print()
     print(f"  2. Copy the job template and fill in feature details:")
     _safe_print(

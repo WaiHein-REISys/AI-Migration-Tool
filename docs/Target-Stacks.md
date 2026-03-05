@@ -40,9 +40,9 @@ LLM prompts:
 | Testing | `*.test.tsx` (frontend) |
 
 LLM prompts:
-- `prompts/plan_system_hrsa_pprs.txt`
-- `prompts/conversion_system_hrsa_pprs.txt`
-- `prompts/conversion_target_stack_hrsa_pprs.txt`
+- `prompts/hrsa_pprs/plan_system.txt`
+- `prompts/hrsa_pprs/conversion_system.txt`
+- `prompts/hrsa_pprs/conversion_target_stack.txt`
 
 ---
 
@@ -62,9 +62,9 @@ LLM prompts:
 | Architecture | Routes → Services → Repositories (3-layer) |
 
 LLM prompts:
-- `prompts/plan_system_snake_case.txt`
-- `prompts/conversion_system_snake_case.txt`
-- `prompts/conversion_target_stack_snake_case.txt`
+- `prompts/snake_case/plan_system.txt`
+- `prompts/snake_case/conversion_system.txt`
+- `prompts/snake_case/conversion_target_stack.txt`
 
 Job template: `agent-prompts/_template_snake_case.yaml`
 
@@ -101,9 +101,9 @@ For a target named `my_flask_app`, the wizard creates:
 
 | Artefact | Path |
 |---|---|
-| Plan prompt | `prompts/plan_system_my_flask_app.txt` |
-| Conversion prompt | `prompts/conversion_system_my_flask_app.txt` |
-| Stack reference | `prompts/conversion_target_stack_my_flask_app.txt` |
+| Plan prompt | `prompts/my_flask_app/plan_system.txt` |
+| Conversion prompt | `prompts/my_flask_app/conversion_system.txt` |
+| Stack reference | `prompts/my_flask_app/conversion_target_stack.txt` |
 | Job template | `agent-prompts/_template_my_flask_app.yaml` |
 | Skillset config | `config/skillset-config.json` → `target_stack_my_flask_app` + `project_structure_my_flask_app` |
 | Registry entry | `config/wizard-registry.json` → `targets.my_flask_app` |
@@ -113,7 +113,7 @@ For a target named `my_flask_app`, the wizard creates:
 After the wizard runs:
 ```bash
 # 1. Review/edit the generated prompts
-#    prompts/plan_system_my_flask_app.txt
+#    prompts/my_flask_app/plan_system.txt
 
 # 2. Create a job file
 cp agent-prompts/_template_my_flask_app.yaml agent-prompts/migrate-MyFeature.yaml
@@ -183,7 +183,7 @@ Describes the output directory layout:
 ```
 
 Both blocks are injected into the LLM conversion prompt at runtime via the
-`{target_stack_summary}` placeholder in `prompts/conversion_system_<id>.txt`.
+`{target_stack_summary}` placeholder in `prompts/<id>/conversion_system.txt`.
 
 ---
 
