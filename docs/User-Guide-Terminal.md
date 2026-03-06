@@ -382,11 +382,11 @@ The wizard will ask:
 Welcome to AI Migration Tool Setup Wizard.
 
 Source codebase name: Reactivites
-Source root path: /Users/me/projects/Reactivites
+Source root path: <SOURCE_ROOT>
 
 Target stack ID [hrsa_simpler_pprs_repo]: hrsa_simpler_pprs_repo
 Target name: hrsa-simpler-pprs
-Target root path: /Users/me/projects/HRSA-Simpler-PPRS
+Target root path: <TARGET_ROOT>
 
 Framework pair: React -> Next.js
 Backend pair: ASP.NET Core -> Flask

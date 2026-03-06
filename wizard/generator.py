@@ -245,8 +245,8 @@ def generate_job_template(answers: dict) -> str:
         pipeline:
           # REQUIRED -- absolute path to the legacy feature folder.
           # Replace <YOUR_SOURCE_ROOT> with your local source codebase path. Examples:
-          #   Windows:     "C:/Projects/MyLegacyApp/{feature_hint}"
-          #   macOS/Linux: "/home/user/projects/my-legacy-app/{feature_hint}"
+          #   Windows:     "<FEATURE_ROOT_WINDOWS>"
+          #   macOS/Linux: "<FEATURE_ROOT_UNIX>"
           feature_root: "{source_root_display}/{feature_hint}"
 
           # REQUIRED -- human-readable name (used in filenames and logs)

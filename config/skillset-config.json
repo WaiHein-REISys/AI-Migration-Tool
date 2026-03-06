@@ -233,7 +233,9 @@
     "target_simpler_grants": "<YOUR_TARGET_ROOT_SIMPLER_GRANTS>",
     "target_hrsa_pprs": "<YOUR_TARGET_ROOT_HRSA_PPRS>",
     "source_gprs": "<YOUR_SOURCE_ROOT>",
-    "modern": "<YOUR_TARGET_ROOT>"
+    "modern": "<YOUR_TARGET_ROOT>",
+    "source_reactivites": "<SOURCE_ROOT>",
+    "hrsa_simpler_pprs_repo": "<TARGET_ROOT>"
   },
   "target_stack_modern": {
     "frontend": {
@@ -321,6 +323,65 @@
       "route_file_pattern": "{feature_name}_routes.py",
       "service_file_pattern": "{feature_name}_service.py",
       "architecture": "Routes -> Services -> Repositories (3-layer)"
+    }
+  },
+  "target_stack_hrsa_simpler_pprs_repo": {
+    "frontend": {
+      "framework": "Next.js",
+      "language": "TypeScript / Python",
+      "components_dir": "components/",
+      "services_dir": "services/",
+      "component_structure": "feature-based folders",
+      "styling": "CSS modules",
+      "barrel_export": "index.ts where useful",
+      "test_suffix": ".test.tsx"
+    },
+    "backend": {
+      "framework": "Flask",
+      "routes_dir": "routes/",
+      "services_dir": "services/",
+      "repositories_dir": "repositories/",
+      "route_file_pattern": "{feature_name}_routes.py",
+      "service_file_pattern": "{feature_name}_service.py",
+      "repository_file_pattern": "{feature_name}_repository.py",
+      "architecture": "Routes -> Services -> Repositories"
+    },
+    "database": {
+      "engine": "PostgreSQL",
+      "access_pattern": "psycopg2 raw SQL",
+      "migration_tool": "alembic"
+    }
+  },
+  "project_structure_hrsa_simpler_pprs_repo": {
+    "frontend": {
+      "components_root": "frontend/src/components/{feature_name}/",
+      "services_root": "frontend/src/services/",
+      "test_suffix": ".test.tsx",
+      "styling": "CSS modules",
+      "barrel_export": "index.ts where useful",
+      "component_structure": "feature-based folders"
+    },
+    "backend": {
+      "api_root": "backend/routes/",
+      "services_root": "backend/services/",
+      "repositories_root": "backend/repositories/",
+      "repository_file_pattern": "{feature_name}_repository.py",
+      "route_file_pattern": "{feature_name}_routes.py",
+      "service_file_pattern": "{feature_name}_service.py",
+      "architecture": "Routes -> Services -> Repositories"
+    }
+  },
+  "source_stack_reactivites": {
+    "frontend": {
+      "framework": "React",
+      "language": "TypeScript / C#",
+      "component_patterns": []
+    },
+    "backend": {
+      "framework": "ASP.NET Core"
+    },
+    "database": {
+      "engine": "PostgreSQL"
     }
   }
 }

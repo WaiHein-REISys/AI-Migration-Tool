@@ -19,9 +19,9 @@ job:
 pipeline:
   # REQUIRED -- absolute path to the legacy feature folder.
   # Replace <YOUR_SOURCE_ROOT> with your local source codebase path. Examples:
-  #   Windows:     "C:/Projects/MyLegacyApp/Commands"
-  #   macOS/Linux: "/home/user/projects/my-legacy-app/Commands"
-  feature_root: "/Users/leohein/Documents/Github/Reactivites/Application/Activities/Commands"
+  #   Windows:     "<FEATURE_ROOT_WINDOWS>"
+  #   macOS/Linux: "<FEATURE_ROOT_UNIX>"
+  feature_root: "<FEATURE_ROOT>"
 
   # REQUIRED -- human-readable name (used in filenames and logs)
   feature_name: "Commands"
@@ -84,9 +84,9 @@ llm:
 
 notes: |
   Source:  React / ASP.NET Core
-           Root: /Users/leohein/Documents/Github/Reactivites
+           Root: <SOURCE_ROOT>
   Target:  Next.js / Flask
-           Root: /Users/leohein/Documents/Github/HRSA-Simpler-PPRS
+           Root: <TARGET_ROOT>
 
   Add any context the agent or human reviewer should know:
   - Business domain of this feature

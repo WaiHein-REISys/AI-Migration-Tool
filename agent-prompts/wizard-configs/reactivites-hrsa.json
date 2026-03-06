@@ -1,0 +1,48 @@
+{
+  "target_id": "hrsa_simpler_pprs_repo",
+  "source": {
+    "name": "reactivites",
+    "root": "<SOURCE_ROOT>",
+    "framework": "React",
+    "backend_framework": "ASP.NET Core",
+    "language": "TypeScript / C#",
+    "database": "PostgreSQL"
+  },
+  "target": {
+    "name": "hrsa-simpler-pprs",
+    "root": "<TARGET_ROOT>",
+    "framework": "Next.js",
+    "backend_framework": "Flask",
+    "language": "TypeScript / Python",
+    "database": "PostgreSQL",
+    "frontend_root": "frontend/src/",
+    "backend_root": "backend/",
+    "frontend_details": {
+      "components_dir": "components/",
+      "services_dir": "services/",
+      "component_structure": "feature-based folders",
+      "styling": "CSS modules",
+      "barrel_export": "index.ts where useful",
+      "test_suffix": ".test.tsx"
+    },
+    "backend_details": {
+      "routes_dir": "routes/",
+      "services_dir": "services/",
+      "repositories_dir": "repositories/",
+      "route_file_pattern": "{feature_name}_routes.py",
+      "service_file_pattern": "{feature_name}_service.py",
+      "repository_file_pattern": "{feature_name}_repository.py",
+      "architecture": "Routes -> Services -> Repositories"
+    },
+    "database_details": {
+      "access_pattern": "psycopg2 raw SQL",
+      "migration_tool": "alembic"
+    }
+  },
+  "job": {
+    "feature_name": "Commands",
+    "feature_root": "<FEATURE_ROOT>",
+    "mode": "plan",
+    "output_filename": "migrate-commands-hrsa_simpler_pprs_repo.yaml"
+  }
+}

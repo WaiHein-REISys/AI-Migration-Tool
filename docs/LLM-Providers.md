@@ -213,14 +213,14 @@ CMAKE_ARGS="-DLLAMA_CUDA=on" pip install llama-cpp-python>=0.2.90
 # Run
 python main.py --feature-root "..." --feature-name "F" --mode plan \
   --llm-provider llamacpp \
-  --llm-model-path "C:/models/mistral-7b.Q4_K_M.gguf"
+  --llm-model-path "<MODEL_PATH>"
 ```
 
 ```yaml
 # Job file
 llm:
   provider: llamacpp
-  model_path: "C:/models/codellama-13b.Q5_K_M.gguf"
+  model_path: "<MODEL_PATH>"
 ```
 
 **Recommended GGUF models:**

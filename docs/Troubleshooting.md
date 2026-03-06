@@ -106,9 +106,9 @@ on the current machine.
 **Fix:** Update `feature_root` with the correct absolute path for your machine.
 Remember to use forward slashes or escaped backslashes:
 ```yaml
-feature_root: "C:/Projects/MyApp/src/FeatureName"
+feature_root: "<FEATURE_ROOT_WINDOWS>"
 # or:
-feature_root: "C:\\Projects\\MyApp\\src\\FeatureName"
+feature_root: "<FEATURE_ROOT_WINDOWS_ESCAPED>"
 ```
 
 ---

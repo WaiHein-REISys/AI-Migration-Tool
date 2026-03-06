@@ -53,8 +53,8 @@ pipeline:
 
   # REQUIRED — absolute path to the legacy feature folder.
   # Examples:
-  #   Windows:     "C:/Projects/MyApp/src/FeatureName"
-  #   macOS/Linux: "/home/user/projects/my-app/src/FeatureName"
+  #   Windows:     "<FEATURE_ROOT_WINDOWS>"
+  #   macOS/Linux: "<FEATURE_ROOT_UNIX>"
   feature_root: "<YOUR_SOURCE_ROOT>/src/FeatureName"
 
   # REQUIRED — human-readable name. Used in filenames, logs, and output paths.

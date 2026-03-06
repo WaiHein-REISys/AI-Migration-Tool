@@ -9,9 +9,9 @@
       "backend_pair": "ASP.NET Core MVC -> Python Flask",
       "created_at": "2026-02-25T05:32:58.553746+00:00",
       "prompt_files": {
-        "plan_system": "plan_system_modern.txt",
-        "conversion_system": "conversion_system_modern.txt",
-        "target_stack": "conversion_target_stack_modern.txt"
+        "plan_system": "modern/plan_system.txt",
+        "conversion_system": "modern/conversion_system.txt",
+        "target_stack": "modern/conversion_target_stack.txt"
       },
       "job_template": "_template_modern.yaml"
     },
@@ -24,11 +24,26 @@
       "backend_pair": "ASP.NET Core MVC -> Python Flask",
       "created_at": "2026-02-26T06:08:03.928513+00:00",
       "prompt_files": {
-        "plan_system": "plan_system_snake_case.txt",
-        "conversion_system": "conversion_system_snake_case.txt",
-        "target_stack": "conversion_target_stack_snake_case.txt"
+        "plan_system": "snake_case/plan_system.txt",
+        "conversion_system": "snake_case/conversion_system.txt",
+        "target_stack": "snake_case/conversion_target_stack.txt"
       },
       "job_template": "_template_snake_case.yaml"
+    },
+    "hrsa_simpler_pprs_repo": {
+      "source_name": "reactivites",
+      "source_root": "<SOURCE_ROOT>",
+      "target_name": "hrsa-simpler-pprs",
+      "target_root": "<TARGET_ROOT>",
+      "framework_pair": "React -> Next.js",
+      "backend_pair": "ASP.NET Core -> Flask",
+      "created_at": "2026-03-03T05:49:55.787273+00:00",
+      "prompt_files": {
+        "plan_system": "hrsa_simpler_pprs_repo/plan_system.txt",
+        "conversion_system": "hrsa_simpler_pprs_repo/conversion_system.txt",
+        "target_stack": "hrsa_simpler_pprs_repo/conversion_target_stack.txt"
+      },
+      "job_template": "_template_hrsa_simpler_pprs_repo.yaml"
     }
   }
 }

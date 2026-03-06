@@ -19,8 +19,8 @@ job:
 pipeline:
   # REQUIRED -- absolute path to the legacy feature folder.
   # Replace with your actual source codebase path. Examples:
-  #   Windows:     "C:/Projects/MyLegacyApp/src/<FeatureName>"
-  #   macOS/Linux: "/home/user/projects/my-legacy-app/src/<FeatureName>"
+  #   Windows:     "<FEATURE_ROOT_WINDOWS>"
+  #   macOS/Linux: "<FEATURE_ROOT_UNIX>"
   # Tip: run the setup wizard to auto-detect paths -- python run_agent.py --setup
   feature_root: "<YOUR_SOURCE_ROOT>/src/<FeatureName>"
 

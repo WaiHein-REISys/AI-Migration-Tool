@@ -24,7 +24,7 @@ Examples:
     python main.py --feature-root "..." --feature-name "ActionHistory" --mode full --llm-provider openai_compat --llm-base-url http://localhost:1234/v1 --llm-model local-model
 
     # Full pipeline with a local GGUF file via llama.cpp
-    python main.py --feature-root "..." --feature-name "ActionHistory" --mode full --llm-provider llamacpp --llm-model-path "C:/models/mistral-7b.Q4_K_M.gguf"
+    python main.py --feature-root "..." --feature-name "ActionHistory" --mode full --llm-provider llamacpp --llm-model-path "<MODEL_PATH>"
 
     # Dry-run (no files written, logs only)
     python main.py --feature-root "..." --feature-name "ActionHistory" --mode full --dry-run

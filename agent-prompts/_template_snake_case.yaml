@@ -19,8 +19,8 @@ job:
 pipeline:
   # REQUIRED -- absolute path to the legacy feature folder.
   # Replace <YOUR_SOURCE_ROOT> with your local source codebase path. Examples:
-  #   Windows:     "C:/Projects/MyLegacyApp/src/<FeatureName>"
-  #   macOS/Linux: "/home/user/projects/my-legacy-app/src/<FeatureName>"
+  #   Windows:     "<FEATURE_ROOT_WINDOWS>"
+  #   macOS/Linux: "<FEATURE_ROOT_UNIX>"
   feature_root: "<YOUR_SOURCE_ROOT>/src/<FeatureName>"
 
   # REQUIRED -- human-readable name (used in filenames and logs)

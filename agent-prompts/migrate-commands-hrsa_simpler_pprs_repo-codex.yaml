@@ -15,7 +15,7 @@ job:
     Next.js / Flask using the Codex CLI as the LLM backend.
 
 pipeline:
-  feature_root: "/Users/leohein/Documents/Github/Reactivites/Application/Activities/Commands"
+  feature_root: "<FEATURE_ROOT>"
   feature_name: "Commands-codex"   # distinct name → unique run_id, separate logs/checkpoints
 
   # Pipeline mode: scope | plan | full
@@ -73,9 +73,9 @@ llm:
 
 notes: |
   Source:  React / ASP.NET Core
-           Root: /Users/leohein/Documents/Github/Reactivites
+           Root: <SOURCE_ROOT>
   Target:  Next.js / Flask
-           Root: /Users/leohein/Documents/Github/HRSA-Simpler-PPRS
+           Root: <TARGET_ROOT>
 
   LLM backend: OpenAI Codex CLI (codex exec --json)
   Output is written to output/Commands-codex/ so it can be compared

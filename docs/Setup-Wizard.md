@@ -122,7 +122,7 @@ this structure:
 
   "source": {
     "name": "legacy_app",
-    "root": "C:/path/to/your/legacy/codebase",
+    "root": "<SOURCE_ROOT>",
     "framework": "Angular 2",
     "backend_framework": "ASP.NET Core 8",
     "language": "TypeScript / C#",
@@ -131,7 +131,7 @@ this structure:
 
   "target": {
     "name": "my_nextjs_flask",
-    "root": "C:/path/to/your/modern/codebase",
+    "root": "<TARGET_ROOT>",
     "framework": "Next.js 15",
     "backend_framework": "Flask 3.0",
     "language": "TypeScript / Python",
@@ -167,7 +167,7 @@ this structure:
 
   "job": {
     "feature_name": "ActionHistory",
-    "feature_root": "C:/path/to/your/legacy/codebase/src/app/features/ActionHistory",
+    "feature_root": "<FEATURE_ROOT>",
     "mode": "plan",
     "output_filename": "migrate-actionhistory-my_nextjs_flask.yaml"
   }
