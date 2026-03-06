@@ -260,6 +260,33 @@ def _is_run_complete(run_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Pipeline orchestration helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_target_root(args: argparse.Namespace, approved_plan: dict):
+    """Resolve target_root from job args or wizard registry.
+
+    Resolution order:
+      1. Explicit ``--target-root`` / ``target_root`` in job YAML (via args)
+      2. ``wizard-registry.json`` targets[id].target_root
+      3. None → IntegrationAgent will skip with status="skipped_no_target"
+    """
+    if getattr(args, "target_root", None):
+        return Path(args.target_root)
+    try:
+        from wizard.registry import load_registry  # type: ignore[import]
+        reg = load_registry().get("targets", {}).get(
+            getattr(args, "target", ""), {}
+        )
+        tr = reg.get("target_root")
+        if tr and tr != "<YOUR_TARGET_ROOT>":
+            return Path(tr)
+    except Exception:
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Pipeline orchestration
 # ---------------------------------------------------------------------------
 
@@ -454,7 +481,28 @@ def run_pipeline(args: argparse.Namespace) -> int:
         all_steps=all_steps,
     )
 
-    # Print summary (success confirmed only after validation passes)
+    # ---- Step 7: Integration & Placement ----
+    print_banner("Step 7: Integration & Placement")
+    from agents.integration_agent import IntegrationAgent  # noqa: PLC0415
+    _target_root = _resolve_target_root(args, approved_plan)
+    integration_agent = IntegrationAgent(
+        approved_plan=approved_plan,
+        output_root=approved_plan["output_root"],
+        target_root=_target_root,
+        run_id=run_id,
+        logs_dir=DEFAULT_LOGS_DIR,
+        config=config,
+        llm_router=None,
+        integration_config=getattr(args, "integration_config", {}),
+        dry_run=args.dry_run,
+    )
+    integration = integration_agent.execute(
+        completed_step_ids=summary.get("completed_steps", []),
+        all_steps=all_steps,
+        validation_findings=validation.get("findings", []),
+    )
+
+    # Print summary (success confirmed only after validation and integration)
     print_banner("Pipeline Complete")
     print(f"  Feature:      {dependency_graph['feature_name']}")
     print(f"  Run ID:       {run_id}")
@@ -464,6 +512,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
         f"  Validation:   {validation['status']} "
         f"({validation['passed']}/{validation['total_checked']} passed)"
     )
+    if integration.get("status") not in {"skipped_no_target", "skipped"}:
+        _placed = len(
+            [p for p in integration.get("placements", []) if p["status"] == "placed"]
+        )
+        print(f"  Integration:  {integration['status']} ({_placed} file(s) placed)")
+        if integration.get("report_json"):
+            print(f"  IntegrationR: {integration['report_json']}")
     print(f"  Output:       {approved_plan['output_root']}")
     print(f"  Log (JSON):   {log_path}")
     print(f"  Log (MD):     {md_log_path}")
@@ -490,7 +545,15 @@ def run_pipeline(args: argparse.Namespace) -> int:
             if finding.get("status") != "PASS":
                 logger.error("   [%s] %s", finding.get("step"), finding.get("reason"))
 
-    return 0 if summary["flagged"] == 0 and validation["status"] != "failed" else 1
+    return (
+        0
+        if (
+            summary["flagged"] == 0
+            and validation["status"] != "failed"
+            and integration.get("status") not in {"partial"}
+        )
+        else 1
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1086,6 +1149,27 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         all_steps=all_steps,
     )
 
+    # ---- Step 7: Integration & Placement ----
+    print_banner("Step 7: Integration & Placement")
+    from agents.integration_agent import IntegrationAgent  # noqa: PLC0415
+    _target_root = _resolve_target_root(args, approved_plan)
+    integration_agent = IntegrationAgent(
+        approved_plan=approved_plan,
+        output_root=approved_plan["output_root"],
+        target_root=_target_root,
+        run_id=run_id,
+        logs_dir=DEFAULT_LOGS_DIR,
+        config=config,
+        llm_router=llm_router,
+        integration_config=getattr(args, "integration_config", {}),
+        dry_run=args.dry_run,
+    )
+    integration = integration_agent.execute(
+        completed_step_ids=summary.get("completed_steps", []),
+        all_steps=all_steps,
+        validation_findings=validation.get("findings", []),
+    )
+
     print_banner("Pipeline Complete")
     print(f"  Feature:      {dependency_graph['feature_name']}")
     print(f"  Run ID:       {run_id}")
@@ -1096,6 +1180,13 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         f"  Validation:   {validation['status']} "
         f"({validation['passed']}/{validation['total_checked']} passed)"
     )
+    if integration.get("status") not in {"skipped_no_target", "skipped"}:
+        _placed = len(
+            [p for p in integration.get("placements", []) if p["status"] == "placed"]
+        )
+        print(f"  Integration:  {integration['status']} ({_placed} file(s) placed)")
+        if integration.get("report_json"):
+            print(f"  IntegrationR: {integration['report_json']}")
     print(f"  Output:       {approved_plan['output_root']}")
     print(f"  Log (JSON):   {log_path}")
     print(f"  Log (MD):     {md_log_path}")
@@ -1122,7 +1213,15 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
             if finding.get("status") != "PASS":
                 logger.error("   [%s] %s", finding.get("step"), finding.get("reason"))
 
-    return 0 if summary["flagged"] == 0 and validation["status"] != "failed" else 1
+    return (
+        0
+        if (
+            summary["flagged"] == 0
+            and validation["status"] != "failed"
+            and integration.get("status") not in {"partial"}
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

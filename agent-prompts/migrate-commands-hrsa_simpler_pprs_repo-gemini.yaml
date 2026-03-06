@@ -1,0 +1,86 @@
+# ============================================================
+# AI Migration Tool -- Job File (Gemini CLI variant)
+# Target: hrsa-simpler-pprs (Next.js / Flask)
+# LLM:    Google Gemini CLI  (subprocess provider)
+# ============================================================
+# Run with:
+#   python run_agent.py --job agent-prompts/migrate-commands-hrsa_simpler_pprs_repo_gemini.yaml
+# ============================================================
+
+job:
+  name: "Migrate Commands -> hrsa-simpler-pprs [gemini]"
+  description: >
+    Migrate the Commands feature from
+    React / ASP.NET Core to
+    Next.js / Flask using the Google Gemini CLI as the LLM backend.
+
+pipeline:
+  feature_root: "/Users/leohein/Documents/Github/Reactivites/Application/Activities/Commands"
+  feature_name: "Commands-gemini"   # distinct name → unique run_id, separate logs/checkpoints
+
+  # Pipeline mode: scope | plan | full
+  mode: "full"
+
+  # Target stack identifier
+  target: "hrsa_simpler_pprs_repo"
+
+  # Write output to a separate folder so gemini output can be compared to claude/codex output
+  output_root: "output/Commands-gemini"
+
+  # true = no files written, logs only
+  dry_run: false
+
+  # true = skip human approval (TESTING ONLY)
+  auto_approve: true   # FOR TESTING — matches claude/codex job YAML setting
+
+  # true = ignore completed-run cache, re-run from scratch
+  force: true
+
+llm:
+  # Use the subprocess provider so the gemini CLI is picked up
+  provider: subprocess
+
+  # null = gemini default model (gemini-2.5-flash-lite at time of writing)
+  # Override with a more capable model for higher quality output, e.g.:
+  #   model: "gemini-2.5-pro"
+  #   model: "gemini-2.5-flash"
+  model: null
+
+  # true = template-only mode, no API key required
+  no_llm: false
+
+  # Optional
+  base_url: null
+  model_path: null
+  ollama_host: null
+  max_tokens: null
+  temperature: null
+
+  # Gemini responses typically arrive in 10–60 s; 120 s gives comfortable headroom.
+  # Large prompts (EditActivity with full context) may take longer — increase if needed.
+  timeout: 120
+
+  # Use the gemini CLI — profile in subprocess_provider.py handles
+  # `gemini -p "" --yolo -o json`
+  # The full combined prompt is written to stdin; -p "" triggers headless mode.
+  subprocess_cmd: "gemini"
+
+  # subprocess_env: inject GEMINI_API_KEY if not already in the environment.
+  # Values support ${VAR} expansion — keep secrets in host env, not here.
+  #
+  # Example:
+  #   subprocess_env:
+  #     GEMINI_API_KEY: "${GEMINI_API_KEY}"
+  #
+  subprocess_env: {}   # empty = subprocess inherits host env (uses cached credentials)
+
+notes: |
+  Source:  React / ASP.NET Core
+           Root: /Users/leohein/Documents/Github/Reactivites
+  Target:  Next.js / Flask
+           Root: /Users/leohein/Documents/Github/HRSA-Simpler-PPRS
+
+  LLM backend: Google Gemini CLI (gemini -p "" --yolo -o json)
+  Output is written to output/Commands-gemini/ so it can be compared
+  against the claude output in output/Commands/ and
+  the codex output in output/Commands-codex/.

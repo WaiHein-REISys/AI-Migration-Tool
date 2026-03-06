@@ -1,0 +1,82 @@
+# ============================================================
+# AI Migration Tool -- Job File (Codex CLI variant)
+# Target: hrsa-simpler-pprs (Next.js / Flask)
+# LLM:    OpenAI Codex CLI  (subprocess provider)
+# ============================================================
+# Run with:
+#   python run_agent.py --job agent-prompts/migrate-commands-hrsa_simpler_pprs_repo_codex.yaml
+# ============================================================
+
+job:
+  name: "Migrate Commands -> hrsa-simpler-pprs [codex]"
+  description: >
+    Migrate the Commands feature from
+    React / ASP.NET Core to
+    Next.js / Flask using the Codex CLI as the LLM backend.
+
+pipeline:
+  feature_root: "/Users/leohein/Documents/Github/Reactivites/Application/Activities/Commands"
+  feature_name: "Commands-codex"   # distinct name → unique run_id, separate logs/checkpoints
+
+  # Pipeline mode: scope | plan | full
+  mode: "full"
+
+  # Target stack identifier
+  target: "hrsa_simpler_pprs_repo"
+
+  # Write output to a separate folder so codex output can be compared to claude output
+  output_root: "output/Commands-codex"
+
+  # true = no files written, logs only
+  dry_run: false
+
+  # true = skip human approval (TESTING ONLY)
+  auto_approve: true   # FOR TESTING — matches claude job YAML setting
+
+  # true = ignore completed-run cache, re-run from scratch
+  force: true
+
+llm:
+  # Use the subprocess provider explicitly so codex is picked up
+  provider: subprocess
+
+  # null = codex default model (gpt-5.3-codex at time of writing)
+  # Override with e.g. "o3" or "gpt-4o" if needed:  model: "o3"
+  model: null
+
+  # true = template-only mode, no API key required
+  no_llm: false
+
+  # Optional
+  base_url: null
+  model_path: null
+  ollama_host: null
+  max_tokens: null
+  temperature: null
+
+  # Codex responses typically arrive in 30–90 s; 180 s gives headroom
+  timeout: 180
+
+  # Use the codex CLI — profile in subprocess_provider.py handles
+  # `codex exec - --ephemeral --dangerously-bypass-approvals-and-sandbox
+  #                -s read-only --json`
+  subprocess_cmd: "codex"
+
+  # subprocess_env: inject OPENAI_API_KEY if not already in the environment.
+  # Values support ${VAR} expansion — keep secrets in host env, not here.
+  #
+  # Example:
+  #   subprocess_env:
+  #     OPENAI_API_KEY: "${OPENAI_API_KEY}"
+  #
+  subprocess_env: {}   # empty = subprocess inherits host env unchanged
+
+notes: |
+  Source:  React / ASP.NET Core
+           Root: /Users/leohein/Documents/Github/Reactivites
+  Target:  Next.js / Flask
+           Root: /Users/leohein/Documents/Github/HRSA-Simpler-PPRS
+
+  LLM backend: OpenAI Codex CLI (codex exec --json)
+  Output is written to output/Commands-codex/ so it can be compared
+  against the claude-generated output in output/Commands/.

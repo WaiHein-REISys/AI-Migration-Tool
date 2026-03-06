@@ -39,9 +39,21 @@ into modern target code, one feature folder at a time. All stages are orchestrat
                    ConversionAgent
                    LLM converts each file per the plan
                          │
+                  Stage 6│
                          ▼
-                   output/<feature>/
-                   logs/<run-id>-conversion-log.*
+                   ValidationAgent
+                   File existence + LLM behavior simulation
+                         │
+                  Stage 7│
+                         ▼
+                   IntegrationAgent
+                   Place files → target_root, sync deps,
+                   verify structure, generate migration scripts
+                         │
+                         ▼
+                   output/<feature>/        (converted source)
+                   target_root/<placed>/    (integrated, if target_root set)
+                   logs/<run-id>-integration-report.*
 ```
 
 ---
@@ -66,6 +78,8 @@ into modern target code, one feature folder at a time. All stages are orchestrat
 | `approval_gate.py` | `ApprovalGate` | Prompts human for `yes` or detects `output/<feature>/.approved` marker for agent approval |
 | `conversion_agent.py` | `ConversionAgent` | Iterates the approved plan; calls LLM per file; writes converted output; maintains checkpoint |
 | `conversion_log.py` | `ConversionLog` | Append-only JSON + Markdown audit log written during conversion |
+| `validation_agent.py` | `ValidationAgent` | Verifies converted outputs exist and are non-empty; runs LLM old-vs-new behavior simulation |
+| `integration_agent.py` | `IntegrationAgent` | Places output files into `target_root`; syncs Python deps; verifies UI/backend structure via LLM; generates migration scripts |
 | `agent_context.py` | `AgentContext` | Shared immutable context passed through all pipeline stages |
 
 ### LLM Abstraction (`agents/llm/`)
@@ -158,6 +172,14 @@ If present, auto-approves. Otherwise, prompts the user to type `yes`.
 5. Writes the output file(s)
 6. Appends a step to `ConversionLog`
 7. Updates the checkpoint (enables `--resume`)
+
+### 6. Validation
+
+`ValidationAgent` verifies that each converted file in `output/<feature>/` exists and is non-empty, then runs an LLM simulation comparing the old source intent to the new output behaviour. Writes `logs/<run-id>-validation-report.(json|md)`. Blocks final success on failures.
+
+### 7. Integration
+
+`IntegrationAgent` runs only when `pipeline.target_root` is set. It reads the conversion log, classifies each output file (`ui` / `backend` / `test` / `config`), resolves the destination path inside `target_root`, and copies the file with `shutil.copy2`. Conflicts (different-content file already exists) are skipped with a warning. After placement it syncs Python dependencies, runs per-file LLM structural checks (`ROLE: UI_INTEGRITY` or `ROLE: BACKEND_STRUCTURE`), and optionally generates a database migration script. Writes `logs/<run-id>-integration-report.(json|md)`.
 
 ---
 

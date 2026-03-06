@@ -225,6 +225,14 @@ def _job_to_args(job: dict, overrides: dict | None = None) -> argparse.Namespace
         llm_subprocess_cmd  = _get(llm, "subprocess_cmd"),
         llm_subprocess_env  = _get(llm, "subprocess_env", {}),  # {KEY: val} injected into subprocess
         select_llm          = False,   # never auto-trigger picker from job files
+
+        # --- Integration (Stage 7) ---
+        target_root         = _get(pipeline, "target_root"),
+        integration_config  = {
+            "enabled":            _get(job.get("integration", {}), "enabled",            True),
+            "add_dependencies":   _get(job.get("integration", {}), "add_dependencies",   True),
+            "generate_migration": _get(job.get("integration", {}), "generate_migration", True),
+        },
     )
 
     # Default feature_name from feature_root stem if not set

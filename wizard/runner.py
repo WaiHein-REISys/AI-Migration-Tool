@@ -143,6 +143,7 @@ def run_wizard(
             feature_name=feature_name,
             feature_root=feature_root,
             mode=job_cfg.get("mode", "plan"),
+            target_root=target.get("root"),
         )
         writer.write(
             AGENT_PROMPTS_DIR / out_name,
@@ -263,7 +264,8 @@ def _print_next_steps(answers: dict, target_id: str) -> None:
         f"       cp agent-prompts/_template_{target_id}.yaml "
         f"agent-prompts/migrate-<FeatureName>-{target_id}.yaml"
     )
-    print(f"     Then set:  pipeline.feature_root  and  pipeline.feature_name")
+    print(f"     Then set:  pipeline.feature_root,  pipeline.feature_name")
+    print(f"                and (optionally) pipeline.target_root  for Stage 7 placement")
     if has_populated_job:
         safe_feature = str(job_cfg.get("feature_name", "")).lower().replace(" ", "-").replace("_", "-")
         auto_job = job_cfg.get("output_filename") or f"migrate-{safe_feature}-{target_id}.yaml"

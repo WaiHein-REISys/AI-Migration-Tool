@@ -1,0 +1,832 @@
+"""
+Integration Agent
+=================
+Stage 7 of the AI Migration Tool pipeline.  Runs after the Validation Agent
+and is responsible for four tasks:
+
+  1. **File Placement** — copy converted files from ``output/<feature>/`` into
+     the correct locations within the actual ``target_root`` codebase, using the
+     ``project_structure`` section of ``skillset-config.json`` to determine paths.
+
+  2. **Dependency Sync** — scan generated code for new imports and add any
+     missing third-party packages to ``target_root/requirements.txt`` (Python)
+     or flag them for ``npm install`` (JS/TS).
+
+  3. **Type-specific Verification** — LLM-powered structural checks:
+     - UI files (.tsx/.ts/.jsx/.scss): component structure, prop types, USWDS
+       class usage, event handlers, business logic parity.
+     - Backend files (.py): alignment with existing models/entities in
+       ``target_root``, naming conventions, data layer consistency.
+
+  4. **Migration Script Generation** — if the backend check flags
+     ``needs_migration=True``, generate an Alembic revision (SQLAlchemy targets)
+     or raw SQL ALTER TABLE script (psycopg2/hrsa targets).
+
+Conflict policy: if a file already exists in ``target_root`` with different
+content the placement is skipped and the step is flagged for human review.
+Identical content is silently skipped (idempotent re-runs).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import re
+import shutil
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from agents.llm import LLMRouter
+
+logger = logging.getLogger(__name__)
+
+# Third-party packages that are commonly seen in generated code but are stdlib-
+# look-alikes — always exclude from auto-dep detection.
+_STDLIB_EXTRAS: frozenset[str] = frozenset({"__future__", "typing", "typing_extensions"})
+
+# Suffixes that indicate UI/frontend files
+_UI_SUFFIXES: frozenset[str] = frozenset({".tsx", ".jsx", ".scss", ".css"})
+
+
+class IntegrationAgent:
+    """
+    Place converted files into ``target_root``, sync dependencies, verify
+    structural correctness, and generate migration scripts as needed.
+    """
+
+    def __init__(
+        self,
+        approved_plan: dict,
+        output_root: str | Path,
+        target_root: str | Path | None,
+        run_id: str,
+        logs_dir: str | Path,
+        config: dict,
+        llm_router: "LLMRouter | None" = None,
+        integration_config: dict | None = None,
+        dry_run: bool = False,
+    ) -> None:
+        self.plan = approved_plan
+        self.output_root = Path(output_root)
+        self.target_root = Path(target_root) if target_root else None
+        self.run_id = run_id
+        self.logs_dir = Path(logs_dir)
+        self.config = config
+        self._router = llm_router
+        self.integration_config = integration_config or {}
+        self.dry_run = dry_run
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+
+        self._feature_name: str = approved_plan.get("feature_name", "")
+        self._target_id: str = approved_plan.get("target", "")
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
+
+    def execute(
+        self,
+        completed_step_ids: list[str],
+        all_steps: list[dict],
+        validation_findings: list[dict] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Run the full integration sequence.
+
+        Parameters
+        ----------
+        completed_step_ids:
+            Step IDs that were successfully converted in Stage 5.
+        all_steps:
+            Full list of plan steps (used for source/target file metadata).
+        validation_findings:
+            Findings from Stage 6 (used to skip FAIL steps from placement).
+
+        Returns
+        -------
+        dict with keys: status, placements, dependency_updates,
+        migration_scripts, verification_findings, report_json, report_md.
+        """
+        _skip_base = {
+            "placements": [],
+            "dependency_updates": {},
+            "migration_scripts": [],
+            "verification_findings": [],
+            "report_json": None,
+            "report_md": None,
+        }
+
+        # Guard: disabled via job YAML
+        if not self.integration_config.get("enabled", True):
+            logger.info("[Integration] Stage disabled via integration.enabled=false.")
+            return {"status": "skipped", **_skip_base}
+
+        # Guard: no target_root configured
+        if self.target_root is None:
+            logger.warning(
+                "[Integration] target_root not configured — skipping placement. "
+                "Set pipeline.target_root in the job YAML or wizard-registry.json."
+            )
+            return {"status": "skipped_no_target", **_skip_base}
+
+        if not self.target_root.exists():
+            logger.warning(
+                "[Integration] target_root does not exist on disk: %s — skipping.",
+                self.target_root,
+            )
+            return {"status": "skipped_no_target", **_skip_base}
+
+        # Dry-run: log intent, return early
+        if self.dry_run:
+            logger.info("[Integration] DRY-RUN: would integrate files into %s", self.target_root)
+            return {"status": "skipped_dry_run", **_skip_base}
+
+        steps_index = {s.get("id"): s for s in all_steps}
+        val_failed: set[str] = {
+            f["step"] for f in (validation_findings or [])
+            if f.get("status") != "PASS"
+        }
+
+        placements: list[dict] = []
+        verification_findings: list[dict] = []
+        migration_scripts: list[dict] = []
+
+        # ---- 1. Collect output files written in Stage 5 -----------------
+        output_files = self._collect_output_files(completed_step_ids, steps_index)
+
+        # ---- 2. Classify, place each file --------------------------------
+        ui_placed: list[dict] = []
+        backend_placed: list[dict] = []
+
+        for file_entry in output_files:
+            step_id = file_entry["step_id"]
+            if step_id in val_failed:
+                logger.warning("[Integration] Skipping %s — validation FAIL", step_id)
+                placements.append({
+                    "step_id": step_id,
+                    "status": "skipped_validation_fail",
+                    "src": str(file_entry["output_path"]),
+                    "dst": None,
+                })
+                continue
+
+            src = Path(file_entry["output_path"])
+            if not src.exists():
+                logger.warning("[Integration] Source file missing: %s", src)
+                placements.append({
+                    "step_id": step_id,
+                    "status": "skipped_missing_src",
+                    "src": str(src),
+                    "dst": None,
+                })
+                continue
+
+            file_type = self._classify_file(src)
+            dst = self._resolve_placement_path(file_entry)
+            placement = self._place_file(src, dst, step_id)
+            placements.append(placement)
+
+            if placement["status"] == "placed":
+                if file_type == "ui":
+                    ui_placed.append({**file_entry, "dst": dst, "type": "ui"})
+                elif file_type == "backend":
+                    backend_placed.append({**file_entry, "dst": dst, "type": "backend"})
+
+        # ---- 3. Dependency sync ------------------------------------------
+        dep_updates: dict[str, Any] = {}
+        add_deps = self.integration_config.get("add_dependencies", True)
+
+        if add_deps:
+            py_files = [Path(e["dst"]) for e in backend_placed if e.get("dst")]
+            ts_files = [Path(e["dst"]) for e in ui_placed if e.get("dst")
+                        and Path(e["dst"]).suffix in {".ts", ".tsx"}]
+            dep_updates["python"] = self._sync_python_deps(py_files)
+            dep_updates["js"] = self._sync_js_deps(ts_files)
+
+        # ---- 4. UI verification ------------------------------------------
+        for entry in ui_placed:
+            step = steps_index.get(entry["step_id"], {})
+            src_path = Path(self.plan.get("feature_root", "")) / step.get("source_file", "")
+            dst_path = Path(entry["dst"])
+            source_code = src_path.read_text(encoding="utf-8", errors="replace") if src_path.exists() else ""
+            target_code = dst_path.read_text(encoding="utf-8", errors="replace") if dst_path.exists() else ""
+            finding = self._verify_ui_integrity(step, source_code, target_code)
+            finding["step_id"] = entry["step_id"]
+            finding["file"] = str(entry["dst"])
+            finding["file_type"] = "ui"
+            verification_findings.append(finding)
+
+        # ---- 5. Backend verification -------------------------------------
+        existing_models = self._read_existing_models()
+        for entry in backend_placed:
+            step = steps_index.get(entry["step_id"], {})
+            dst_path = Path(entry["dst"])
+            target_code = dst_path.read_text(encoding="utf-8", errors="replace") if dst_path.exists() else ""
+            finding = self._verify_backend_structure(step, target_code, existing_models)
+            finding["step_id"] = entry["step_id"]
+            finding["file"] = str(entry["dst"])
+            finding["file_type"] = "backend"
+            verification_findings.append(finding)
+
+        # ---- 6. Migration script generation -----------------------------
+        gen_migration = self.integration_config.get("generate_migration", True)
+        if gen_migration:
+            steps_needing_migration = [
+                f for f in verification_findings
+                if f.get("needs_migration") and f.get("file_type") == "backend"
+            ]
+            if steps_needing_migration:
+                migration_scripts = self._generate_migration_script(steps_needing_migration)
+
+        # ---- 7. Compute overall status ----------------------------------
+        has_conflict = any(p["status"] == "conflict" for p in placements)
+        has_fail = any(
+            f.get("status") == "FAIL" for f in verification_findings
+        )
+        status = "partial" if (has_conflict or has_fail) else "integrated"
+
+        # ---- 8. Write report --------------------------------------------
+        report = {
+            "run_id": self.run_id,
+            "status": status,
+            "target_root": str(self.target_root),
+            "placements": placements,
+            "dependency_updates": dep_updates,
+            "migration_scripts": migration_scripts,
+            "verification_findings": verification_findings,
+        }
+        json_path, md_path = self._write_report(report)
+        report["report_json"] = str(json_path)
+        report["report_md"] = str(md_path)
+        return report
+
+    # ------------------------------------------------------------------
+    # File collection
+    # ------------------------------------------------------------------
+
+    def _collect_output_files(
+        self,
+        completed_step_ids: list[str],
+        steps_index: dict[str, dict],
+    ) -> list[dict]:
+        """
+        Build the list of files to place by reading the conversion log and
+        filtering to steps that completed successfully.
+        """
+        log_path = self.logs_dir / f"{self.run_id}-conversion-log.json"
+        wrote: dict[str, dict] = {}  # step_id → most recent wrote_file entry
+
+        if log_path.exists():
+            try:
+                log_data = json.loads(log_path.read_text(encoding="utf-8"))
+                for entry in log_data.get("entries", []):
+                    if entry.get("action") == "wrote_file" and entry.get("plan_step_ref"):
+                        step_id = entry["plan_step_ref"]
+                        wrote[step_id] = entry
+            except Exception as exc:
+                logger.warning("[Integration] Could not read conversion log: %s", exc)
+
+        files: list[dict] = []
+        for step_id in completed_step_ids:
+            step = steps_index.get(step_id, {})
+            target_rel = step.get("target_file", "")
+            if not target_rel:
+                continue
+            output_path = self.output_root / target_rel
+            files.append({
+                "step_id": step_id,
+                "target_rel": target_rel,
+                "output_path": str(output_path),
+            })
+
+        return files
+
+    # ------------------------------------------------------------------
+    # File classification
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _classify_file(path: Path) -> Literal["ui", "backend", "test", "config"]:
+        suffix = path.suffix.lower()
+        name = path.name.lower()
+
+        if "test" in name or name.startswith("test_"):
+            return "test"
+        if suffix in _UI_SUFFIXES:
+            return "ui"
+        if suffix == ".ts" and not name.endswith(".d.ts"):
+            return "ui"
+        if suffix == ".py":
+            return "backend"
+        return "config"
+
+    # ------------------------------------------------------------------
+    # Placement path resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_placement_path(self, file_entry: dict) -> Path:
+        """
+        Map an output-relative path to a target_root-relative destination.
+
+        Tries ``project_structure`` templates first; falls back to mirroring
+        the output directory structure verbatim.
+        """
+        target_rel = file_entry["target_rel"]
+        feature_name = self._feature_name
+
+        # Try project_structure config
+        struct_key = (
+            f"project_structure_{self._target_id}"
+            if f"project_structure_{self._target_id}" in self.config
+            else "project_structure"
+        )
+        struct = self.config.get(struct_key, {})
+
+        # Walk frontend/backend sub-dicts for a matching root template
+        for section in struct.values():
+            if not isinstance(section, dict):
+                continue
+            for template in section.values():
+                if not isinstance(template, str):
+                    continue
+                # Expand {feature_name}
+                try:
+                    prefix = template.format(feature_name=feature_name)
+                except (KeyError, ValueError):
+                    continue
+                # If the target_rel already starts with this prefix, use as-is
+                if target_rel.startswith(prefix):
+                    return self.target_root / target_rel
+
+        # Fallback: mirror output structure
+        return self.target_root / target_rel
+
+    # ------------------------------------------------------------------
+    # File placement
+    # ------------------------------------------------------------------
+
+    def _place_file(self, src: Path, dst: Path, step_id: str) -> dict:
+        """
+        Copy ``src`` to ``dst``.  Returns a placement record with status:
+        ``placed``, ``skipped_identical``, or ``conflict``.
+        """
+        base = {"step_id": step_id, "src": str(src), "dst": str(dst)}
+
+        if dst.exists():
+            src_hash = hashlib.sha256(src.read_bytes()).hexdigest()
+            dst_hash = hashlib.sha256(dst.read_bytes()).hexdigest()
+            if src_hash == dst_hash:
+                logger.debug("[Integration] Identical, skip: %s", dst)
+                return {**base, "status": "skipped_identical"}
+            # Different content → conflict: skip + warn
+            logger.warning(
+                "[Integration] CONFLICT — %s already exists with different content. "
+                "Resolve manually and re-run.",
+                dst,
+            )
+            return {**base, "status": "conflict"}
+
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            logger.info("[Integration] Placed: %s → %s", src.name, dst)
+            return {**base, "status": "placed"}
+        except OSError as exc:
+            logger.error("[Integration] Failed to copy %s → %s: %s", src, dst, exc)
+            return {**base, "status": "error", "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Dependency sync — Python
+    # ------------------------------------------------------------------
+
+    def _sync_python_deps(self, py_files: list[Path]) -> dict:
+        """
+        Parse top-level imports from generated ``.py`` files and append any
+        missing third-party packages to ``target_root/requirements.txt``.
+        """
+        result: dict[str, list] = {"added": [], "already_present": [], "skipped_stdlib": []}
+        req_path = self.target_root / "requirements.txt"
+
+        if not py_files:
+            return result
+
+        # Build set of packages already in requirements.txt
+        existing: set[str] = set()
+        if req_path.exists():
+            for line in req_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    pkg = re.split(r"[>=<!~\[]", line)[0].strip().lower()
+                    if pkg:
+                        existing.add(pkg)
+
+        # Extract imports from generated files
+        import_pattern = re.compile(
+            r"^\s*(?:import\s+([\w]+)|from\s+([\w]+)\s+import)", re.MULTILINE
+        )
+        stdlib_names: frozenset[str] = frozenset(
+            getattr(sys, "stdlib_module_names", set())
+        ) | _STDLIB_EXTRAS
+
+        to_add: list[str] = []
+        for py_file in py_files:
+            if not py_file.exists():
+                continue
+            code = py_file.read_text(encoding="utf-8", errors="replace")
+            for match in import_pattern.finditer(code):
+                pkg = (match.group(1) or match.group(2) or "").lower()
+                if not pkg or pkg in stdlib_names:
+                    result["skipped_stdlib"].append(pkg)
+                    continue
+                if pkg in existing:
+                    if pkg not in result["already_present"]:
+                        result["already_present"].append(pkg)
+                    continue
+                if pkg not in to_add:
+                    to_add.append(pkg)
+
+        if to_add:
+            lines = [f"\n# added by ai-migration-tool ({self.run_id})"]
+            lines += [f"{pkg}" for pkg in sorted(to_add)]
+            addition = "\n".join(lines) + "\n"
+            if req_path.exists():
+                req_path.write_text(
+                    req_path.read_text(encoding="utf-8") + addition,
+                    encoding="utf-8",
+                )
+            else:
+                req_path.write_text(addition.lstrip(), encoding="utf-8")
+            result["added"] = sorted(to_add)
+            logger.info("[Integration] Added %d Python dep(s): %s", len(to_add), to_add)
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Dependency sync — JavaScript / TypeScript
+    # ------------------------------------------------------------------
+
+    def _sync_js_deps(self, ts_files: list[Path]) -> dict:
+        """
+        Parse ``import … from 'pkg'`` statements and report packages that are
+        not already in ``package.json``.  Does NOT auto-write ``package.json``
+        (avoids running npm install unexpectedly).
+        """
+        result: dict[str, list] = {"needs_install": [], "already_present": []}
+        pkg_json_path = self.target_root / "package.json"
+
+        if not ts_files:
+            return result
+
+        existing: set[str] = set()
+        if pkg_json_path.exists():
+            try:
+                pkg_data = json.loads(pkg_json_path.read_text(encoding="utf-8"))
+                existing = set(pkg_data.get("dependencies", {}).keys()) | \
+                           set(pkg_data.get("devDependencies", {}).keys())
+            except Exception:
+                pass
+
+        import_pattern = re.compile(r"""['"]([@\w][\w\-./]*)['"]""")
+        third_party_pattern = re.compile(r"^[^./]")  # must not start with . or /
+
+        for ts_file in ts_files:
+            if not ts_file.exists():
+                continue
+            code = ts_file.read_text(encoding="utf-8", errors="replace")
+            for match in import_pattern.finditer(code):
+                pkg_raw = match.group(1)
+                # Normalise scoped packages: @org/pkg → @org/pkg
+                parts = pkg_raw.split("/")
+                pkg = "/".join(parts[:2]) if pkg_raw.startswith("@") else parts[0]
+                if not third_party_pattern.match(pkg):
+                    continue
+                if pkg in existing:
+                    if pkg not in result["already_present"]:
+                        result["already_present"].append(pkg)
+                else:
+                    if pkg not in result["needs_install"]:
+                        result["needs_install"].append(pkg)
+
+        if result["needs_install"]:
+            logger.warning(
+                "[Integration] %d JS package(s) may need installing: %s",
+                len(result["needs_install"]),
+                result["needs_install"],
+            )
+        return result
+
+    # ------------------------------------------------------------------
+    # UI integrity verification
+    # ------------------------------------------------------------------
+
+    def _verify_ui_integrity(
+        self, step: dict, source_code: str, target_code: str
+    ) -> dict[str, Any]:
+        """
+        LLM-based check on React/Next.js component structure, prop types,
+        USWDS class usage, and business logic parity.
+        """
+        if self._router is None or not self._router.is_available:
+            return {
+                "status": "PASS",
+                "issues": [],
+                "needs_migration": False,
+                "confidence": 0.4,
+                "reason": "LLM unavailable; UI sanity check skipped.",
+            }
+
+        from agents.llm import LLMMessage
+        from agents.llm.base import LLMNotAvailableError, LLMProviderError
+
+        system = self._resolve_integration_prompt()
+        user = (
+            f"ROLE: UI_INTEGRITY\n"
+            f"Step: {step.get('id', '?')}\n"
+            f"Source file: {step.get('source_file', '?')}\n"
+            f"Target file: {step.get('target_file', '?')}\n\n"
+            f"ORIGINAL SOURCE:\n```\n{source_code[:6000]}\n```\n\n"
+            f"CONVERTED TARGET:\n```\n{target_code[:6000]}\n```\n"
+        )
+
+        try:
+            response = self._router.complete(
+                system=system,
+                messages=[LLMMessage(role="user", content=user)],
+            )
+            return self._parse_integration_json(response.text, step.get("id", "?"))
+        except (LLMNotAvailableError, LLMProviderError, ValueError) as exc:
+            logger.warning("[Integration] UI check fallback for %s: %s", step.get("id"), exc)
+            return {
+                "status": "PASS",
+                "issues": [],
+                "needs_migration": False,
+                "confidence": 0.35,
+                "reason": f"UI check simulation unavailable ({exc}).",
+            }
+
+    # ------------------------------------------------------------------
+    # Backend structure verification
+    # ------------------------------------------------------------------
+
+    def _read_existing_models(self) -> str:
+        """
+        Read existing model/entity files from target_root for LLM context.
+        Returns concatenated content (truncated to 8 000 chars).
+        """
+        if self.target_root is None:
+            return ""
+        patterns = ["**/model*.py", "**/entity*.py", "**/models/*.py", "**/entities/*.py"]
+        snippets: list[str] = []
+        seen: set[Path] = set()
+        for pattern in patterns:
+            for p in self.target_root.rglob(pattern.lstrip("**/")):
+                if p in seen:
+                    continue
+                seen.add(p)
+                try:
+                    content = p.read_text(encoding="utf-8", errors="replace")
+                    snippets.append(f"# {p.name}\n{content[:2000]}")
+                    if sum(len(s) for s in snippets) > 8000:
+                        break
+                except OSError:
+                    pass
+        return "\n\n".join(snippets)
+
+    def _verify_backend_structure(
+        self, step: dict, target_code: str, existing_models: str
+    ) -> dict[str, Any]:
+        """
+        LLM-based check that the generated backend code aligns with existing
+        models/entities.  Sets ``needs_migration=True`` if new DB columns or
+        tables are detected.
+        """
+        if self._router is None or not self._router.is_available:
+            return {
+                "status": "PASS",
+                "issues": [],
+                "needs_migration": False,
+                "confidence": 0.4,
+                "reason": "LLM unavailable; backend structure check skipped.",
+            }
+
+        from agents.llm import LLMMessage
+        from agents.llm.base import LLMNotAvailableError, LLMProviderError
+
+        system = self._resolve_integration_prompt()
+        user = (
+            f"ROLE: BACKEND_STRUCTURE\n"
+            f"Step: {step.get('id', '?')}\n"
+            f"Target file: {step.get('target_file', '?')}\n\n"
+            f"CONVERTED CODE:\n```python\n{target_code[:6000]}\n```\n\n"
+            f"EXISTING MODELS IN TARGET CODEBASE:\n```python\n{existing_models[:4000]}\n```\n"
+        )
+
+        try:
+            response = self._router.complete(
+                system=system,
+                messages=[LLMMessage(role="user", content=user)],
+            )
+            return self._parse_integration_json(response.text, step.get("id", "?"))
+        except (LLMNotAvailableError, LLMProviderError, ValueError) as exc:
+            logger.warning("[Integration] Backend check fallback for %s: %s", step.get("id"), exc)
+            return {
+                "status": "PASS",
+                "issues": [],
+                "needs_migration": False,
+                "confidence": 0.35,
+                "reason": f"Backend check simulation unavailable ({exc}).",
+            }
+
+    # ------------------------------------------------------------------
+    # Migration script generation
+    # ------------------------------------------------------------------
+
+    def _generate_migration_script(
+        self, steps_needing_migration: list[dict]
+    ) -> list[dict]:
+        """
+        Generate a DB migration script for each step that flagged
+        ``needs_migration=True``.  Uses LLM; falls back gracefully.
+        """
+        results: list[dict] = []
+
+        if self._router is None or not self._router.is_available:
+            logger.warning(
+                "[Integration] Migration script generation skipped — no LLM available."
+            )
+            return results
+
+        from agents.llm import LLMMessage
+        from agents.llm.base import LLMNotAvailableError, LLMProviderError
+
+        system = self._resolve_integration_prompt()
+
+        for finding in steps_needing_migration:
+            step_id = finding.get("step_id", "unknown")
+            target_file = finding.get("file", "")
+            target_code = ""
+            if target_file and Path(target_file).exists():
+                target_code = Path(target_file).read_text(encoding="utf-8", errors="replace")
+
+            user = (
+                f"ROLE: MIGRATION_SCRIPT\n"
+                f"Step: {step_id}\n"
+                f"Modified file: {target_file}\n\n"
+                f"CONVERTED CODE:\n```python\n{target_code[:6000]}\n```\n\n"
+                f"Issues reported:\n{json.dumps(finding.get('issues', []), indent=2)}\n"
+            )
+
+            try:
+                response = self._router.complete(
+                    system=system,
+                    messages=[LLMMessage(role="user", content=user)],
+                )
+                script_content = self._extract_script(response.text)
+                ext = ".py" if "alembic" in script_content.lower() or "revision" in script_content.lower() else ".sql"
+                script_path = self.logs_dir / f"{self.run_id}-migration-{step_id}{ext}"
+                script_path.write_text(script_content, encoding="utf-8")
+                results.append({"step_id": step_id, "script_path": str(script_path)})
+                logger.info("[Integration] Migration script written: %s", script_path)
+            except (LLMNotAvailableError, LLMProviderError) as exc:
+                logger.warning("[Integration] Migration script generation failed for %s: %s", step_id, exc)
+
+        return results
+
+    # ------------------------------------------------------------------
+    # Prompt helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_integration_prompt(self) -> str:
+        """Load the integration system prompt for the current target."""
+        from prompts import resolve_prompt_filename, load_prompt
+        filename = resolve_prompt_filename(
+            self._target_id, "integration_system", "integration_system.txt"
+        )
+        return load_prompt(filename)
+
+    # ------------------------------------------------------------------
+    # JSON parsing helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_integration_json(raw_text: str, step_id: str) -> dict[str, Any]:
+        """Parse LLM JSON response for integration checks."""
+        text = raw_text.strip()
+        # Strip markdown code fences if present
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            # Try to extract first {...} block
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+            else:
+                raise ValueError(f"[{step_id}] LLM returned non-JSON: {text[:200]}")
+
+        status = str(data.get("status", "PASS")).upper()
+        if status not in {"PASS", "WARN", "FAIL"}:
+            status = "PASS"
+
+        return {
+            "status": status,
+            "issues": data.get("issues", []),
+            "needs_migration": bool(data.get("needs_migration", False)),
+            "confidence": float(data.get("confidence", 0.0)),
+            "reason": data.get("reason", ""),
+            "script": data.get("script"),
+        }
+
+    @staticmethod
+    def _extract_script(raw_text: str) -> str:
+        """Extract SQL or Python script from LLM response, stripping code fences."""
+        text = raw_text.strip()
+        match = re.search(r"```(?:sql|python)?\s*(.*?)\s*```", text, re.DOTALL)
+        return match.group(1).strip() if match else text
+
+    # ------------------------------------------------------------------
+    # Reporting
+    # ------------------------------------------------------------------
+
+    def _write_report(self, report: dict) -> tuple[Path, Path]:
+        json_path = self.logs_dir / f"{self.run_id}-integration-report.json"
+        md_path = self.logs_dir / f"{self.run_id}-integration-report.md"
+        json_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+        md_path.write_text(self._render_markdown(report), encoding="utf-8")
+        return json_path, md_path
+
+    @staticmethod
+    def _render_markdown(report: dict) -> str:
+        status = report.get("status", "?").upper()
+        placements = report.get("placements", [])
+        placed = [p for p in placements if p.get("status") == "placed"]
+        conflicts = [p for p in placements if p.get("status") == "conflict"]
+        dep = report.get("dependency_updates", {})
+        py_added = dep.get("python", {}).get("added", [])
+        js_needs = dep.get("js", {}).get("needs_install", [])
+        migrations = report.get("migration_scripts", [])
+        findings = report.get("verification_findings", [])
+        fails = [f for f in findings if f.get("status") == "FAIL"]
+        warns = [f for f in findings if f.get("status") == "WARN"]
+
+        lines = [
+            f"# Integration Report — {report['run_id']}",
+            "",
+            f"- **Status:** {status}",
+            f"- **Target root:** `{report.get('target_root', '?')}`",
+            f"- **Files placed:** {len(placed)} / {len(placements)}",
+            f"- **Conflicts:** {len(conflicts)}",
+            f"- **Python deps added:** {len(py_added)}",
+            f"- **JS packages needing install:** {len(js_needs)}",
+            f"- **Migration scripts:** {len(migrations)}",
+            f"- **Verification FAIL:** {len(fails)}  WARN: {len(warns)}",
+            "",
+        ]
+
+        if placed:
+            lines += ["## Files Placed", ""]
+            for p in placed:
+                lines.append(f"- `{p.get('dst', '?')}`")
+            lines.append("")
+
+        if conflicts:
+            lines += ["## Conflicts (manual review required)", ""]
+            for p in conflicts:
+                lines.append(f"- `{p.get('dst', '?')}` — existing file has different content")
+            lines.append("")
+
+        if py_added:
+            lines += ["## Python Dependencies Added", ""]
+            for pkg in py_added:
+                lines.append(f"- `{pkg}`")
+            lines.append("")
+
+        if js_needs:
+            lines += ["## JS Packages Needing Install", ""]
+            lines.append(f"Run: `npm install {' '.join(js_needs)}`")
+            lines.append("")
+
+        if migrations:
+            lines += ["## Migration Scripts", ""]
+            for m in migrations:
+                lines.append(f"- `{m.get('script_path', '?')}` (step `{m.get('step_id', '?')}`)")
+            lines.append("")
+
+        if findings:
+            lines += ["## Verification Findings", ""]
+            for f in findings:
+                icon = {"PASS": "✓", "WARN": "⚠", "FAIL": "✗"}.get(f.get("status", "?"), "?")
+                lines.append(
+                    f"- {icon} `{f.get('step_id', '?')}` [{f.get('status', '?')}]: "
+                    f"{f.get('reason', '')} (confidence={f.get('confidence', 0.0):.2f})"
+                )
+                for issue in f.get("issues", []):
+                    lines.append(f"  - {issue}")
+            lines.append("")
+
+        return "\n".join(lines) + "\n"

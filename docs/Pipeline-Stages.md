@@ -1,6 +1,6 @@
 # Pipeline Stages
 
-The pipeline has six sequential stages plus an optional plan revision step.
+The pipeline has seven sequential stages plus an optional plan revision step.
 All stages are orchestrated by `main.py` and controlled by the `pipeline.mode` setting.
 
 | Stage | Mode | Description |
@@ -12,6 +12,7 @@ All stages are orchestrated by `main.py` and controlled by the `pipeline.mode` s
 | 4. Approval | `full` | Human or agent approves the plan |
 | 5. Conversion | `full` | LLM converts each file |
 | 6. Validation Simulation | `full` | File checks + LLM-based old-vs-new behavior simulation before success |
+| 7. Integration & Placement | `full` | Places converted files into `target_root`, syncs deps, verifies structure, generates migration scripts |
 
 ---
 
@@ -259,10 +260,61 @@ Pass `--force` to bypass and re-run from scratch.
 
 ---
 
+## Stage 7 — Integration & Placement
+
+**Agent:** `IntegrationAgent`
+
+**Inputs:**
+- Converted output files in `output/<feature>/` (via `logs/<run-id>-conversion-log.json`)
+- `pipeline.target_root` — path to the target codebase (from job YAML or wizard registry)
+- `integration_config` — `{enabled, add_dependencies, generate_migration}`
+- Validation findings from Stage 6
+
+**Guard checks (in order):**
+1. `target_root` is `null` or does not exist on disk → returns `status: skipped_no_target`, logs a warning, pipeline exits successfully
+2. `integration.enabled: false` → returns `status: skipped`
+3. `dry_run: true` → logs all planned actions but writes nothing, returns `status: skipped_dry_run`
+
+**What it does:**
+1. Reads `logs/<run-id>-conversion-log.json` to collect all `wrote_file` entries
+2. Classifies each output file as `ui`, `backend`, `test`, or `config`
+3. Resolves the destination path inside `target_root` using `project_structure` config templates
+4. Places each file with `shutil.copy2` — conflicts (existing file with different content) are **skipped with a warning** and flagged for human review; identical-content files are silently skipped (idempotent re-runs)
+5. Syncs Python dependencies: parses top-level `import` statements, diffs against `target_root/requirements.txt`, appends missing third-party packages with `# added by ai-migration-tool` comment
+6. Reports JavaScript dependencies: parses `import … from 'pkg'` in `.ts/.tsx` files, diffs against `target_root/package.json` — reports packages needing `npm install` but **does not auto-write** to avoid unintended installs
+7. Runs LLM structural checks per file:
+   - `ROLE: UI_INTEGRITY` — component structure, USWDS class names, event handlers, prop types, business logic parity
+   - `ROLE: BACKEND_STRUCTURE` — route signatures, model field alignment, naming conventions, `needs_migration` flag
+8. Generates a DB migration script if any backend check sets `needs_migration: true` (Alembic `.py` for SQLAlchemy targets; raw SQL for psycopg2/HRSA targets)
+9. Writes `logs/<run-id>-integration-report.json` and `.md`
+
+**Placement conflict policy:** Skip + warn. The existing file in `target_root` is never overwritten automatically. A `"conflict"` entry in `placements[]` signals the file needs human merge.
+
+**Status values:**
+
+| Status | Meaning |
+|---|---|
+| `integrated` | All files placed, no FAIL-level structural findings |
+| `partial` | One or more files had conflicts or FAIL findings — pipeline returns exit code 1 |
+| `skipped` | `integration.enabled: false` |
+| `skipped_no_target` | `target_root` not set or does not exist — pipeline still succeeds |
+| `skipped_dry_run` | `dry_run: true` — actions logged, nothing written |
+
+**Outputs:**
+- `target_root/<placed files>` — converted files placed into the target codebase
+- `target_root/requirements.txt` — appended with missing Python deps (if `add_dependencies: true`)
+- `logs/<run-id>-integration-report.json` — machine-readable placement + verification report
+- `logs/<run-id>-integration-report.md` — human-readable summary
+- `logs/<run-id>-migration-<step_id>.sql` or `.py` — generated migration script(s)
+
+**LLM fallback (no router):** Structural checks return `PASS` with `confidence: 0.4` rather than failing.
+
+---
+
 ## Mode Reference
 
 | `pipeline.mode` | Stages executed |
 |---|---|
 | `scope` | 1 → 2 |
 | `plan` | 1 → 2 → 3 |
-| `full` | 1 → 2 → 3 → 4 → 5 |
+| `full` | 1 → 2 → 3 → 4 → 5 → 6 → 7 |

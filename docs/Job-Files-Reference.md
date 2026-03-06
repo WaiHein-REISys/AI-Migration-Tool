@@ -85,6 +85,29 @@ pipeline:
   # The completed-run registry in logs/completed-runs.json is ignored.
   force: false
 
+  # OPTIONAL — absolute path to the target codebase root.
+  # Used by Stage 7 (Integration) to place converted files directly into the
+  # target repo. Leave null to generate output only (no placement).
+  # The Setup Wizard populates this automatically from target.root.
+  target_root: null
+
+# ─────────────────────────────────────────────
+# integration — Stage 7 settings
+# ─────────────────────────────────────────────
+integration:
+
+  # false = skip Stage 7 entirely. Pipeline still succeeds.
+  enabled: true
+
+  # true = auto-append missing Python packages to target_root/requirements.txt
+  # with a "# added by ai-migration-tool" comment. JS deps are reported only.
+  add_dependencies: true
+
+  # true = generate a DB migration script when structural checks detect new
+  # columns or tables. Alembic (.py) for SQLAlchemy targets; raw SQL for
+  # psycopg2/HRSA targets.
+  generate_migration: true
+
 # ─────────────────────────────────────────────
 # llm — LLM provider settings
 # ─────────────────────────────────────────────
@@ -156,6 +179,10 @@ notes: |
 | `pipeline.dry_run` | `false` | |
 | `pipeline.auto_approve` | `false` | |
 | `pipeline.force` | `false` | |
+| `pipeline.target_root` | `null` | Populated automatically by Setup Wizard from `target.root` |
+| `integration.enabled` | `true` | Set `false` to skip Stage 7 entirely |
+| `integration.add_dependencies` | `true` | Auto-append missing Python deps to `requirements.txt` |
+| `integration.generate_migration` | `true` | Generate DB migration script on schema changes |
 | `llm.no_llm` | `false` | |
 | `llm.provider` | auto-detect | |
 | `llm.model` | provider default | |

@@ -41,6 +41,19 @@ pipeline:
   # true = ignore completed-run cache, re-run from scratch
   force: false
 
+  # OPTIONAL — absolute path to the target codebase root.
+  # Used by Stage 7 (Integration) to place converted files into the target repo.
+  # Leave null if you only want to generate output without placing it.
+  target_root: null
+
+# ── Integration (Stage 7) ──────────────────────────────────────────────────
+# Runs after validation. Places output files into target_root, syncs
+# dependencies, verifies structural alignment, and generates migration scripts.
+integration:
+  enabled: true            # set false to skip Stage 7 entirely
+  add_dependencies: true   # auto-add missing Python deps to requirements.txt
+  generate_migration: true # generate DB migration script if model changes detected
+
 llm:
   # null = auto-detect from environment variables
   provider: null   # anthropic | openai | openai_compat | ollama | llamacpp

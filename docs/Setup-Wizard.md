@@ -97,12 +97,14 @@ For a new target named `my_nextjs_flask`:
 | Plan prompt | `prompts/my_nextjs_flask/plan_system.txt` | LLM instructions for plan generation |
 | Conversion prompt | `prompts/my_nextjs_flask/conversion_system.txt` | LLM instructions for code conversion |
 | Stack reference | `prompts/my_nextjs_flask/conversion_target_stack.txt` | Target stack patterns injected at runtime |
-| Job template | `agent-prompts/_template_my_nextjs_flask.yaml` | Ready-to-fill migration job template |
-| Optional populated job | `agent-prompts/migrate-<feature>-my_nextjs_flask.yaml` | Auto-generated if `job.feature_name` + `job.feature_root` are provided in setup config |
+| Job template | `agent-prompts/_template_my_nextjs_flask.yaml` | Ready-to-fill migration job template — includes `target_root` and `integration:` block |
+| Optional populated job | `agent-prompts/migrate-<feature>-my_nextjs_flask.yaml` | Auto-generated if `job.feature_name` + `job.feature_root` are provided; `target_root` is pre-filled from `target.root` |
 | Skillset entries | `config/skillset-config.json` | `target_stack_*` + `project_structure_*` blocks |
 | Registry entry | `config/wizard-registry.json` | Idempotency guard; stores source/target roots |
 
 All artefacts are skipped if they already exist. Use `--overwrite` to regenerate.
+
+> **Stage 7 note:** When `target.root` is supplied in the wizard config, the generated job template and any auto-populated job file both have `pipeline.target_root` pre-filled. This enables Stage 7 (Integration & Placement) to run immediately after the first `full` conversion without any manual edits to the job file.
 
 ---
 
@@ -181,6 +183,10 @@ If omitted, the wizard uses auto-detected defaults.
 - If both `job.feature_name` and `job.feature_root` are present, setup writes a concrete job file with placeholders already populated.
 - `job.mode` defaults to `plan` when omitted.
 - `job.output_filename` defaults to `migrate-<feature>-<target_id>.yaml` when omitted.
+
+`target.root` behavior:
+- Stored in `wizard-registry.json` for reference.
+- Also written directly into `pipeline.target_root` in both the job template and any auto-populated job file, so Stage 7 (Integration & Placement) is ready to run without manual edits.
 
 See `agent-prompts/wizard-configs/example-wizard-config.json` for a concrete filled-in example.
 

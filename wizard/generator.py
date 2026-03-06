@@ -270,6 +270,19 @@ def generate_job_template(answers: dict) -> str:
           # true = ignore completed-run cache, re-run from scratch
           force: false
 
+          # OPTIONAL -- absolute path to the target codebase root.
+          # Used by Stage 7 (Integration) to place converted files into the target repo.
+          # Leave null if you only want to generate output without placing it.
+          target_root: {f'"{target_path}"' if target_path else 'null'}
+
+        # ── Integration (Stage 7) ──────────────────────────────────────────────────
+        # Runs after validation. Places output files into target_root, syncs
+        # dependencies, verifies structural alignment, and generates migration scripts.
+        integration:
+          enabled: true            # set false to skip Stage 7 entirely
+          add_dependencies: true   # auto-add missing Python deps to requirements.txt
+          generate_migration: true # generate DB migration script if model changes detected
+
         llm:
           # null = auto-detect from environment variables
           provider: null   # anthropic | openai | openai_compat | ollama | llamacpp
@@ -307,12 +320,17 @@ def populate_job_template(
     feature_name: str,
     feature_root: str,
     mode: str = "plan",
+    target_root: str | None = None,
 ) -> str:
     """
     Fill a wizard-generated job template with concrete feature values.
 
     This is used when setup input already includes an initial feature selection
     and we want a ready-to-run plan job file immediately after setup.
+
+    ``target_root`` is optional — when provided it replaces the ``target_root:``
+    field in the pipeline section so Stage 7 (Integration) can place files
+    directly into the target codebase.
     """
     safe_feature_name = (feature_name or "").strip()
     safe_feature_root = str(feature_root or "").strip().replace("\\", "/")
@@ -340,6 +358,14 @@ def populate_job_template(
         content,
         count=1,
     )
+    if target_root:
+        safe_target_root = str(target_root).strip().replace("\\", "/")
+        content = re.sub(
+            r'(target_root:\s*)null',
+            lambda m: f'{m.group(1)}"{safe_target_root}"',
+            content,
+            count=1,
+        )
     return content
 
 

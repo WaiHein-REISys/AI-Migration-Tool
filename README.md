@@ -210,7 +210,7 @@ See [Agent Interactive Mode](docs/Agent-Interactive-Mode.md) for the full comman
 ## Pipeline Stages
 
 ```
-Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Conversion → Validation Simulation
+Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Conversion → Validation → Integration
 ```
 
 | Stage | Agent | Output |
@@ -221,6 +221,7 @@ Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Con
 | 4. Approval | `ApprovalGate` | Human types `yes` **or** agent writes `.approved` marker |
 | 5. Conversion | `ConversionAgent` | `output/<feature>/` + `logs/<run-id>-conversion-log.*` |
 | 6. Validation Simulation | `ValidationAgent` | `logs/<run-id>-validation-report.(json|md)`; success only confirmed after pass |
+| 7. Integration & Placement | `IntegrationAgent` | Files placed in `target_root`; deps synced; `logs/<run-id>-integration-report.(json|md)` |
 
 Plan revision (step 3b):
 - `--revise-plan --feedback "..."` re-runs `PlanAgent` with LLM feedback injected
@@ -468,6 +469,8 @@ ai-migration-tool/
 │   ├── conversion_agent.py
 │   ├── conversion_log.py
 │   ├── approval_gate.py             # Detects .approved marker for agent approval
+│   ├── validation_agent.py          # Stage 6 — file checks + LLM behavior simulation
+│   ├── integration_agent.py         # Stage 7 — placement, dep sync, structural verification
 │   └── llm/
 │       ├── base.py                  # LLMMessage, LLMResponse, LLMConfig, BaseLLMProvider
 │       ├── registry.py              # LLMRouter — provider factory, auto-detect, interactive picker
@@ -486,8 +489,9 @@ ai-migration-tool/
 │   ├── plan_document_template.md    # Shared scaffold (no-LLM / template mode)
 │   ├── modern/                      # modern target — plan + conversion + stack prompts
 │   ├── snake_case/                  # snake_case target
+│   ├── integration_system.txt       # Default integration prompt (Stage 7 fallback)
 │   ├── hrsa_pprs/                   # hrsa_pprs target
-│   ├── hrsa_simpler_pprs_repo/      # hrsa_simpler_pprs_repo target
+│   ├── hrsa_simpler_pprs_repo/      # hrsa_simpler_pprs_repo target (incl. integration_system.txt)
 │   └── <target_id>/                 # Wizard-generated target subdirectory
 │
 ├── config/
@@ -550,4 +554,4 @@ See [Guardrail Rules](docs/Guardrail-Rules.md) for rationale and enforcement det
 
 ---
 
-*AI Migration Tool v1.4 | Multi-agent pipeline with interactive agent mode, plan revision, and Setup Wizard*
+*AI Migration Tool v1.5 | 7-stage pipeline with Integration & Placement, interactive agent mode, plan revision, and Setup Wizard*
