@@ -59,3 +59,4 @@ desktop.ini
 .env.local
 *.env
 secrets.json
+devops_status_update.py

@@ -67,7 +67,7 @@ See **[Agent Interactive Mode](Agent-Interactive-Mode.md)** for the complete ref
 ## Pipeline Overview
 
 ```
-Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Conversion → Validation → Integration
+Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Conversion → Validation → UI Consistency → Integration
 ```
 
 | Stage | Agent | Output |
@@ -78,6 +78,7 @@ Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Con
 | 4. Approval | `ApprovalGate` | Human `yes` or `.approved` marker |
 | 5. Conversion | `ConversionAgent` | `output/<feature>/` |
 | 6. Validation | `ValidationAgent` | `logs/<run-id>-validation-report.(json\|md)` |
+| 6b. UI Consistency | `UIConsistencyAgent` | `logs/<run-id>-ui-consistency-report.(json\|md)` |
 | 7. Integration | `IntegrationAgent` | Files placed in `target_root`; `logs/<run-id>-integration-report.(json\|md)` |
 
 See **[Pipeline Stages](Pipeline-Stages.md)** for full details.

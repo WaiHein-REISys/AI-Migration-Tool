@@ -283,6 +283,14 @@ def generate_job_template(answers: dict) -> str:
           add_dependencies: true   # auto-add missing Python deps to requirements.txt
           generate_migration: true # generate DB migration script if model changes detected
 
+        # ── UI Consistency Audit (Stage 6b) ───────────────────────────────────────
+        # Compares Angular source template against the converted React/TSX output.
+        # Diffs CSS classes, HTML elements, event bindings, and structural directives.
+        ui_consistency:
+          enabled: true                  # set false to skip Stage 6b entirely
+          generate_stories: false        # true = emit .stories.tsx stub per UI component
+          fail_on_missing_classes: true  # true = FAIL if CSS classes are dropped
+
         # ── End-to-End Verification (Stage 8) ───────────────────────────────────
         # Runs command-based checks (build/test/lint) after integration.
         verification:

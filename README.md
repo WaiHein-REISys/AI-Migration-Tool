@@ -254,7 +254,7 @@ See [Agent Interactive Mode](docs/Agent-Interactive-Mode.md) for the full comman
 ## Pipeline Stages
 
 ```
-Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Conversion → Validation → Integration
+Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Conversion → Validation → UI Consistency → Integration
 ```
 
 | Stage | Agent | Output |
@@ -265,6 +265,7 @@ Config Ingestion → Scoping & Analysis → Plan Generation → Approval → Con
 | 4. Approval | `ApprovalGate` | Human types `yes` **or** agent writes `.approved` marker |
 | 5. Conversion | `ConversionAgent` | `output/<feature>/` + `logs/<run-id>-conversion-log.*` |
 | 6. Validation Simulation | `ValidationAgent` | `logs/<run-id>-validation-report.(json|md)`; success only confirmed after pass |
+| 6b. UI Consistency Audit | `UIConsistencyAgent` | `logs/<run-id>-ui-consistency-report.(json|md)`; diffs CSS classes, elements, events |
 | 7. Integration & Placement | `IntegrationAgent` | Files placed in `target_root`; deps synced; `logs/<run-id>-integration-report.(json|md)` |
 
 Plan revision (step 3b):
@@ -515,6 +516,7 @@ ai-migration-tool/
 │   ├── conversion_log.py
 │   ├── approval_gate.py             # Detects .approved marker for agent approval
 │   ├── validation_agent.py          # Stage 6 — file checks + LLM behavior simulation
+│   ├── ui_consistency_agent.py      # Stage 6b — CSS/element/event diff, optional Storybook stubs
 │   ├── integration_agent.py         # Stage 7 — placement, dep sync, structural verification
 │   └── llm/
 │       ├── base.py                  # LLMMessage, LLMResponse, LLMConfig, BaseLLMProvider
@@ -535,6 +537,7 @@ ai-migration-tool/
 │   ├── modern/                      # modern target — plan + conversion + stack prompts
 │   ├── snake_case/                  # snake_case target
 │   ├── integration_system.txt       # Default integration prompt (Stage 7 fallback)
+│   ├── ui_consistency_system.txt    # UI consistency audit prompt (Stage 6b)
 │   ├── hrsa_pprs/                   # hrsa_pprs target
 │   ├── hrsa_simpler_pprs_repo/      # hrsa_simpler_pprs_repo target (incl. integration_system.txt)
 │   └── <target_id>/                 # Wizard-generated target subdirectory
@@ -599,4 +602,4 @@ See [Guardrail Rules](docs/Guardrail-Rules.md) for rationale and enforcement det
 
 ---
 
-*AI Migration Tool v1.5 | 7-stage pipeline with Integration & Placement, interactive agent mode, plan revision, and Setup Wizard*
+*AI Migration Tool v1.6 | 9-stage pipeline with UI Consistency Audit, Integration & Placement, interactive agent mode, plan revision, and Setup Wizard*

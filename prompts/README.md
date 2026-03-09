@@ -16,6 +16,7 @@ prompts/
 ├── conversion_system.txt              # Default conversion prompt (fallback)
 ├── conversion_target_stack.txt        # Default target stack reference (fallback)
 ├── integration_system.txt             # Default integration prompt — UI/backend checks + migration scripts (fallback)
+├── ui_consistency_system.txt          # UI consistency audit prompt (Stage 6b) — shared across all targets
 ├── plan_document_template.md          # Shared Jinja2 scaffold (no-LLM / template mode)
 │
 ├── modern/                            # Angular 2 / ASP.NET Core → Next.js / Flask
@@ -51,6 +52,7 @@ prompts/
 | `conversion_system.txt` | `ConversionAgent` | System prompt for code conversion. Contains `{rules_text}` and `{target_stack_summary}` placeholders filled at runtime. |
 | `conversion_target_stack.txt` | `ConversionAgent` | Target stack reference block injected into `conversion_system.txt` as `{target_stack_summary}`. |
 | `integration_system.txt` | `IntegrationAgent` | System prompt for Stage 7 integration checks and migration script generation. Multiplexes three roles via a `ROLE:` header in the user message: `UI_INTEGRITY`, `BACKEND_STRUCTURE`, `MIGRATION_SCRIPT`. Response format: strict JSON `{status, issues, needs_migration, confidence, script?}`. |
+| `ui_consistency_system.txt` | `UIConsistencyAgent` | System prompt for Stage 6b UI consistency classification. Role: `UI_CONSISTENCY`. Classifies each diff item as `expected_idiom_change`, `expected_structural_change`, or `potential_omission`. Response format: strict JSON `{findings: [{item, type, classification, reason}]}`. Shared across all targets — no target-specific variant needed. |
 
 ---
 

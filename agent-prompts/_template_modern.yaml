@@ -58,6 +58,12 @@ integration:
   add_dependencies: true   # auto-add missing Python deps to requirements.txt
   generate_migration: true # generate DB migration script if model changes detected
 
+# ── UI Consistency Audit (Stage 6b) ───────────────────────────────────────
+ui_consistency:
+  enabled: true
+  generate_stories: false
+  fail_on_missing_classes: true
+
 # Stage 8: command-based end-to-end verification (build/test/lint)
 verification:
   enabled: false

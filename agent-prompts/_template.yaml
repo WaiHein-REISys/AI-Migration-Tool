@@ -54,6 +54,15 @@ integration:
   add_dependencies: true   # auto-add missing Python deps to requirements.txt
   generate_migration: true # generate DB migration script if model changes detected
 
+# ── UI Consistency Audit (Stage 6b) ───────────────────────────────────────
+# Compares Angular source template against converted React/TSX output.
+# Diffs CSS classes, HTML elements, event bindings, and structural directives.
+# Option C: set generate_stories: true to emit Storybook .stories.tsx stubs.
+ui_consistency:
+  enabled: true                  # set false to skip Stage 6b entirely
+  generate_stories: false        # true = emit .stories.tsx stub per UI component
+  fail_on_missing_classes: true  # true = FAIL if CSS classes are dropped
+
 # Stage 8: command-based end-to-end verification (build/test/lint)
 verification:
   enabled: false

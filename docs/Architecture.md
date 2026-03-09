@@ -44,6 +44,12 @@ into modern target code, one feature folder at a time. All stages are orchestrat
                    ValidationAgent
                    File existence + LLM behavior simulation
                          │
+                 Stage 6b│
+                         ▼
+                   UIConsistencyAgent
+                   Static diff: Angular source vs React/TSX
+                   CSS classes, elements, events, directives
+                         │
                   Stage 7│
                          ▼
                    IntegrationAgent
@@ -79,6 +85,7 @@ into modern target code, one feature folder at a time. All stages are orchestrat
 | `conversion_agent.py` | `ConversionAgent` | Iterates the approved plan; calls LLM per file; writes converted output; maintains checkpoint |
 | `conversion_log.py` | `ConversionLog` | Append-only JSON + Markdown audit log written during conversion |
 | `validation_agent.py` | `ValidationAgent` | Verifies converted outputs exist and are non-empty; runs LLM old-vs-new behavior simulation |
+| `ui_consistency_agent.py` | `UIConsistencyAgent` | Static regex diff of Angular source vs converted React/TSX; checks CSS classes, HTML elements, event bindings, and structural directives; optional Storybook story generation |
 | `integration_agent.py` | `IntegrationAgent` | Places output files into `target_root`; syncs Python deps; verifies UI/backend structure via LLM; generates migration scripts |
 | `agent_context.py` | `AgentContext` | Shared immutable context passed through all pipeline stages |
 
@@ -176,6 +183,17 @@ If present, auto-approves. Otherwise, prompts the user to type `yes`.
 ### 6. Validation
 
 `ValidationAgent` verifies that each converted file in `output/<feature>/` exists and is non-empty, then runs an LLM simulation comparing the old source intent to the new output behaviour. Writes `logs/<run-id>-validation-report.(json|md)`. Blocks final success on failures.
+
+### 6b. UI Consistency Audit
+
+`UIConsistencyAgent` performs a static code diff between the Angular source templates and the converted React/TSX output. For each UI step in the approved plan it:
+- Extracts CSS classes, HTML elements, Angular event bindings, and structural directives from the source
+- Extracts the equivalent items from the converted output
+- Computes the diff and derives a status (`PASS` / `WARN` / `FAIL`)
+- Optionally calls the LLM (`ROLE: UI_CONSISTENCY`) to classify each diff as `expected_idiom_change`, `expected_structural_change`, or `potential_omission`
+- Optionally emits Storybook `.stories.tsx` stubs when `generate_stories: true`
+
+Writes `logs/<run-id>-ui-consistency-report.(json|md)`. A `FAIL` status (missing CSS classes or elements) blocks final success when `fail_on_missing_classes: true`.
 
 ### 7. Integration
 

@@ -481,6 +481,23 @@ def run_pipeline(args: argparse.Namespace) -> int:
         all_steps=all_steps,
     )
 
+    # ---- Step 6b: UI Consistency Audit ----
+    print_banner("Step 6b: UI Consistency Audit")
+    from agents.ui_consistency_agent import UIConsistencyAgent  # noqa: PLC0415
+    ui_consistency_agent = UIConsistencyAgent(
+        approved_plan=approved_plan,
+        output_root=approved_plan["output_root"],
+        run_id=run_id,
+        logs_dir=DEFAULT_LOGS_DIR,
+        llm_router=llm_router,
+        ui_consistency_config=getattr(args, "ui_consistency_config", {}),
+        dry_run=args.dry_run,
+    )
+    ui_consistency = ui_consistency_agent.execute(
+        completed_step_ids=summary.get("completed_steps", []),
+        all_steps=all_steps,
+    )
+
     # ---- Step 7: Integration & Placement ----
     print_banner("Step 7: Integration & Placement")
     from agents.integration_agent import IntegrationAgent  # noqa: PLC0415
@@ -524,6 +541,14 @@ def run_pipeline(args: argparse.Namespace) -> int:
         f"  Validation:   {validation['status']} "
         f"({validation['passed']}/{validation['total_checked']} passed)"
     )
+    if ui_consistency.get("status") not in {"skipped_disabled", "skipped_no_ui_files", "skipped_dry_run"}:
+        print(
+            f"  UI Consist.:  {ui_consistency['status']} "
+            f"({ui_consistency['passed']} pass / {ui_consistency['warned']} warn / "
+            f"{ui_consistency['failed']} fail)"
+        )
+        if ui_consistency.get("report_md"):
+            print(f"  UI Consist. Report: {ui_consistency['report_md']}")
     if integration.get("status") not in {"skipped_no_target", "skipped"}:
         _placed = len(
             [p for p in integration.get("placements", []) if p["status"] == "placed"]
@@ -560,6 +585,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
         for finding in validation.get("findings", []):
             if finding.get("status") != "PASS":
                 logger.error("   [%s] %s", finding.get("step"), finding.get("reason"))
+    if ui_consistency.get("status") == "failed":
+        logger.error("[X] UI consistency audit failed — CSS classes or elements are missing.")
     if verification.get("status") == "failed":
         logger.error("[X] End-to-end verification failed. Review the E2E report.")
 
@@ -568,6 +595,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         if (
             summary["flagged"] == 0
             and validation["status"] != "failed"
+            and ui_consistency.get("status") != "failed"
             and integration.get("status") not in {"partial"}
             and verification.get("status") != "failed"
         )
@@ -1178,6 +1206,23 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         all_steps=all_steps,
     )
 
+    # ---- Step 6b: UI Consistency Audit ----
+    print_banner("Step 6b: UI Consistency Audit")
+    from agents.ui_consistency_agent import UIConsistencyAgent  # noqa: PLC0415
+    ui_consistency_agent = UIConsistencyAgent(
+        approved_plan=approved_plan,
+        output_root=approved_plan["output_root"],
+        run_id=run_id,
+        logs_dir=DEFAULT_LOGS_DIR,
+        llm_router=llm_router,
+        ui_consistency_config=getattr(args, "ui_consistency_config", {}),
+        dry_run=args.dry_run,
+    )
+    ui_consistency = ui_consistency_agent.execute(
+        completed_step_ids=summary.get("completed_steps", []),
+        all_steps=all_steps,
+    )
+
     # ---- Step 7: Integration & Placement ----
     print_banner("Step 7: Integration & Placement")
     from agents.integration_agent import IntegrationAgent  # noqa: PLC0415
@@ -1221,6 +1266,14 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         f"  Validation:   {validation['status']} "
         f"({validation['passed']}/{validation['total_checked']} passed)"
     )
+    if ui_consistency.get("status") not in {"skipped_disabled", "skipped_no_ui_files", "skipped_dry_run"}:
+        print(
+            f"  UI Consist.:  {ui_consistency['status']} "
+            f"({ui_consistency['passed']} pass / {ui_consistency['warned']} warn / "
+            f"{ui_consistency['failed']} fail)"
+        )
+        if ui_consistency.get("report_md"):
+            print(f"  UI Consist. Report: {ui_consistency['report_md']}")
     if integration.get("status") not in {"skipped_no_target", "skipped"}:
         _placed = len(
             [p for p in integration.get("placements", []) if p["status"] == "placed"]
@@ -1257,6 +1310,8 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         for finding in validation.get("findings", []):
             if finding.get("status") != "PASS":
                 logger.error("   [%s] %s", finding.get("step"), finding.get("reason"))
+    if ui_consistency.get("status") == "failed":
+        logger.error("[X] UI consistency audit failed — CSS classes or elements are missing.")
     if verification.get("status") == "failed":
         logger.error("[X] End-to-end verification failed. Review the E2E report.")
 
@@ -1265,6 +1320,7 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         if (
             summary["flagged"] == 0
             and validation["status"] != "failed"
+            and ui_consistency.get("status") != "failed"
             and integration.get("status") not in {"partial"}
             and verification.get("status") != "failed"
         )

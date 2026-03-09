@@ -241,6 +241,13 @@ def _job_to_args(job: dict, overrides: dict | None = None) -> argparse.Namespace
             "env":           _get(job.get("verification", {}), "env", {}),
             "fail_on_error": _get(job.get("verification", {}), "fail_on_error", True),
         },
+
+        # --- UI Consistency Audit (Stage 6b) ---
+        ui_consistency_config = {
+            "enabled":                 _get(job.get("ui_consistency", {}), "enabled",                 True),
+            "generate_stories":        _get(job.get("ui_consistency", {}), "generate_stories",        False),
+            "fail_on_missing_classes": _get(job.get("ui_consistency", {}), "fail_on_missing_classes", True),
+        },
     )
 
     # Default feature_name from feature_root stem if not set

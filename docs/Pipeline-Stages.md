@@ -1,6 +1,6 @@
 # Pipeline Stages
 
-The pipeline has eight sequential stages plus an optional plan revision step.
+The pipeline has nine sequential stages plus an optional plan revision step.
 All stages are orchestrated by `main.py` and controlled by the `pipeline.mode` setting.
 
 | Stage | Mode | Description |
@@ -12,6 +12,7 @@ All stages are orchestrated by `main.py` and controlled by the `pipeline.mode` s
 | 4. Approval | `full` | Human or agent approves the plan |
 | 5. Conversion | `full` | LLM converts each file |
 | 6. Validation Simulation | `full` | File checks + LLM-based old-vs-new behavior simulation before success |
+| 6b. UI Consistency Audit | `full` | Static diff of Angular source vs converted React/TSX — CSS classes, elements, events, directives |
 | 7. Integration & Placement | `full` | Places converted files into `target_root`, syncs deps, verifies structure, generates migration scripts |
 | 8. End-to-End Verification | `full` | Runs configured shell commands (build/test/lint/e2e) against converted/integrated code |
 
@@ -261,6 +262,71 @@ Pass `--force` to bypass and re-run from scratch.
 
 ---
 
+## Stage 6b — UI Consistency Audit
+
+**Agent:** `UIConsistencyAgent`
+
+**Inputs:**
+- Approved conversion plan (step definitions, source file paths)
+- Converted output `.tsx` / `.jsx` files in `output/<feature>/`
+- Source Angular component files (`.component.html`, `.component.ts`)
+- `ui_consistency_config` — `{enabled, generate_stories, fail_on_missing_classes}`
+- Optional LLM router for diff classification
+
+**Guard checks (in order):**
+1. `dry_run: true` → returns `status: skipped_dry_run`
+2. `ui_consistency.enabled: false` → returns `status: skipped_disabled`
+3. No UI-type steps found in the plan → returns `status: skipped_no_ui_files`
+
+**What it does:**
+
+For each UI step in the approved plan:
+1. Extracts CSS classes, HTML elements, event bindings, and structural directives from the Angular source using regex
+2. Extracts the equivalent items from the converted React/TSX output
+3. Computes a diff: missing classes, missing elements, missing event handlers, directive coverage
+4. Derives a per-step status: `PASS`, `WARN` (missing handlers only), or `FAIL` (missing classes or elements)
+5. Optionally calls the LLM with role `UI_CONSISTENCY` to classify each diff item as:
+   - `expected_idiom_change` — normal Angular→React translation (e.g. `ngClass` → `className`)
+   - `expected_structural_change` — intentional restructuring
+   - `potential_omission` — possible missing translation (reported as a finding)
+   LLM classification can downgrade a `FAIL` to `WARN` if all diffs are `expected_idiom_change`
+6. Optionally writes a Storybook `.stories.tsx` stub next to each converted component when `generate_stories: true`
+7. Writes `logs/<run-id>-ui-consistency-report.json` and `.md`
+
+**Angular extraction:**
+- `.component.html` → CSS classes from `class="..."`, elements by tag name, Angular event bindings `(click)`, `(change)`, etc., `*ngIf` / `*ngFor` / `[(ngModel)]` counts
+- `.component.ts` (fallback) → inline template extraction + `@Input()` / `@Output()` declarations
+
+**React extraction:**
+- `className="..."` / `className={...}` → CSS classes
+- JSX element names → semantic elements
+- `onClick`, `onChange`, `onSubmit`, etc. → event handlers
+- Conditional renders (`&&` / `? :`) → `*ngIf` equivalents; `.map(...)` → `*ngFor` equivalents
+
+**Angular→React event mapping:** `(click)→onClick`, `(change)→onChange`, `(submit)→onSubmit`, `(blur)→onBlur`, `(focus)→onFocus`, `(input)→onInput`, `(keyup)→onKeyUp`, `(keydown)→onKeyDown`, `(keypress)→onKeyPress`, `(mouseenter)→onMouseEnter`, `(mouseleave)→onMouseLeave`, `(scroll)→onScroll`, `(dblclick)→onDoubleClick`, `(contextmenu)→onContextMenu`, `(wheel)→onWheel`
+
+**Status values:**
+
+| Status | Meaning |
+|---|---|
+| `passed` | All UI steps have zero missing classes, elements, or events |
+| `warned` | One or more steps have missing event handlers but no missing classes/elements |
+| `failed` | One or more steps have missing CSS classes or HTML elements — pipeline returns exit code 1 |
+| `skipped_disabled` | `ui_consistency.enabled: false` |
+| `skipped_no_ui_files` | No UI-type steps found in the plan |
+| `skipped_dry_run` | `dry_run: true` |
+
+**Outputs:**
+- `logs/<run-id>-ui-consistency-report.json` — machine-readable findings per step
+- `logs/<run-id>-ui-consistency-report.md` — human-readable audit table
+- `output/<feature>/<ComponentName>.stories.tsx` — Storybook stub(s) (if `generate_stories: true`)
+
+**LLM fallback (no router):** Classification is skipped; raw diff results are reported directly. Status is derived purely from the static diff counts.
+
+**Prompt file:** `prompts/ui_consistency_system.txt` (no target-specific variant needed — the check is framework-agnostic at the diff level)
+
+---
+
 ## Stage 7 — Integration & Placement
 
 **Agent:** `IntegrationAgent`
@@ -362,4 +428,4 @@ Pass `--force` to bypass and re-run from scratch.
 |---|---|
 | `scope` | 1 → 2 |
 | `plan` | 1 → 2 → 3 |
-| `full` | 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 |
+| `full` | 1 → 2 → 3 → 4 → 5 → 6 → 6b → 7 → 8 |

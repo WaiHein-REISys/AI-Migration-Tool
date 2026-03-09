@@ -109,6 +109,24 @@ integration:
   generate_migration: true
 
 # ─────────────────────────────────────────────
+# ui_consistency — Stage 6b settings (UI audit)
+# ─────────────────────────────────────────────
+ui_consistency:
+
+  # false = skip Stage 6b entirely.
+  enabled: true
+
+  # true = emit a Storybook .stories.tsx stub next to each converted UI component.
+  # The stub includes a default story and an empty args table. Useful as a starting
+  # point for visual regression testing.
+  generate_stories: false
+
+  # true = fail the pipeline (exit code 1) if any CSS classes from the Angular source
+  # are missing from the converted React/TSX output.
+  # Set false to demote missing-class findings to warnings only.
+  fail_on_missing_classes: true
+
+# ─────────────────────────────────────────────
 # verification — Stage 8 settings (end-to-end checks)
 # ─────────────────────────────────────────────
 verification:
@@ -205,6 +223,9 @@ notes: |
 | `integration.enabled` | `true` | Set `false` to skip Stage 7 entirely |
 | `integration.add_dependencies` | `true` | Auto-append missing Python deps to `requirements.txt` |
 | `integration.generate_migration` | `true` | Generate DB migration script on schema changes |
+| `ui_consistency.enabled` | `true` | Set `false` to skip Stage 6b UI audit entirely |
+| `ui_consistency.generate_stories` | `false` | Set `true` to emit Storybook `.stories.tsx` stubs |
+| `ui_consistency.fail_on_missing_classes` | `true` | Set `false` to demote missing CSS classes to warnings |
 | `verification.enabled` | `false` | Set `true` to run Stage 8 command-based verification |
 | `verification.cwd` | `null` | Defaults to `target_root`, then `output_root` |
 | `verification.commands` | `[]` | Ordered shell commands for build/test/lint verification |
