@@ -27,6 +27,8 @@ from agents.llm.base import (
     LLMNotAvailableError,
     LLMProviderError,
     LLMResponse,
+    ToolCall,
+    ToolDefinition,
 )
 
 logger = logging.getLogger(__name__)
@@ -109,4 +111,93 @@ class AnthropicProvider(BaseLLMProvider):
         except anthropic.AuthenticationError as exc:
             raise LLMProviderError(
                 f"Anthropic authentication failed — check ANTHROPIC_API_KEY: {exc}"
+            ) from exc
+
+    # ------------------------------------------------------------------
+    # Native tool-use (Anthropic tool_use API)
+    # ------------------------------------------------------------------
+
+    def supports_tool_use(self) -> bool:
+        return True
+
+    def complete_with_tools(
+        self,
+        system: str,
+        messages: list[LLMMessage],
+        tools: list[ToolDefinition],
+    ) -> LLMResponse:
+        """
+        Call Claude with tool definitions. Returns an LLMResponse with
+        .tool_calls populated when Claude chose to invoke a tool, or
+        .text populated for a regular text response.
+        """
+        if not self._client:
+            raise LLMNotAvailableError(
+                "AnthropicProvider is not configured. "
+                "Set ANTHROPIC_API_KEY and pip install anthropic."
+            )
+
+        import anthropic  # type: ignore
+
+        # Convert ToolDefinition → Anthropic tools format
+        sdk_tools = [
+            {
+                "name": t.name,
+                "description": t.description,
+                "input_schema": t.parameters,
+            }
+            for t in tools
+        ]
+        sdk_messages = [{"role": m.role, "content": m.content} for m in messages]
+
+        try:
+            response = self._client.messages.create(
+                model=self.config.model,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature,
+                system=system,
+                messages=sdk_messages,
+                tools=sdk_tools,
+                tool_choice={"type": "auto"},
+            )
+
+            # Parse tool_use blocks from response.content
+            tool_calls: list[ToolCall] = []
+            text_parts: list[str] = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    tool_calls.append(
+                        ToolCall(
+                            tool_name=block.name,
+                            tool_input=dict(block.input) if block.input else {},
+                            tool_call_id=block.id,
+                        )
+                    )
+                elif block.type == "text":
+                    text_parts.append(block.text)
+
+            return LLMResponse(
+                text=" ".join(text_parts),
+                model=response.model,
+                provider="anthropic",
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                raw=response,
+                tool_calls=tool_calls if tool_calls else None,
+            )
+        except anthropic.APIError as exc:
+            raise LLMProviderError(
+                f"Anthropic tool-use API error [{exc.status_code}]: {exc.message}"
+            ) from exc
+        except anthropic.APIConnectionError as exc:
+            raise LLMProviderError(
+                f"Anthropic connection error (tool-use): {exc}"
+            ) from exc
+        except anthropic.RateLimitError as exc:
+            raise LLMProviderError(
+                f"Anthropic rate limit exceeded (tool-use): {exc}"
+            ) from exc
+        except anthropic.AuthenticationError as exc:
+            raise LLMProviderError(
+                f"Anthropic authentication failed (tool-use) — check ANTHROPIC_API_KEY: {exc}"
             ) from exc

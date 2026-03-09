@@ -101,6 +101,7 @@ class PlanAgent:
         target: str = "simpler_grants",
         revision_notes: str | None = None,
         original_plan: str | None = None,
+        memory_context: "Any | None" = None,
     ) -> None:
         """
         Parameters
@@ -114,15 +115,20 @@ class PlanAgent:
         original_plan : str | None
             Content of the previous plan, forwarded to the LLM for context when
             ``revision_notes`` is provided.
+        memory_context : MemoryContext | None
+            Optional memory context from MemoryStore.  When non-empty, the
+            context_summary is appended to the LLM user message so the model
+            applies proven patterns and user preferences from prior migrations.
         """
-        self.graph           = dependency_graph
-        self.config          = config
-        self.run_id          = run_id
-        self.plans_dir       = Path(plans_dir)
-        self._router         = llm_router
-        self.target          = target
-        self.revision_notes  = revision_notes
-        self.original_plan   = original_plan
+        self.graph            = dependency_graph
+        self.config           = config
+        self.run_id           = run_id
+        self.plans_dir        = Path(plans_dir)
+        self._router          = llm_router
+        self.target           = target
+        self.revision_notes   = revision_notes
+        self.original_plan    = original_plan
+        self._memory_context  = memory_context
 
         # Resolve system prompt filename dynamically — no hardcoded map.
         self._system_prompt_file = resolve_prompt_filename(
@@ -244,6 +250,13 @@ class PlanAgent:
                     f"\n\nORIGINAL PLAN (revise this — do NOT copy unchanged sections verbatim):\n"
                     f"```markdown\n{self.original_plan}\n```\n"
                 )
+
+        # -- Memory context: inject proven patterns and user preferences --
+        if self._memory_context and getattr(self._memory_context, "context_summary", ""):
+            user_message += (
+                f"\n\nMIGRATION MEMORY (apply these proven patterns and preferences):\n"
+                f"{self._memory_context.context_summary}\n"
+            )
 
         try:
             response = self._router.complete(

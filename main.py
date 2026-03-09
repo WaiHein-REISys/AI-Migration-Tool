@@ -1014,6 +1014,16 @@ def main() -> int:
     # (run_pipeline calls build_llm_router internally, so we patch args instead)
     args._llm_router_cache = llm_router
 
+    # ---- Orchestration routing ----
+    orch_cfg = getattr(args, "orchestration_config", {}) or {}
+    if orch_cfg.get("enabled", False):
+        logger.info(
+            "Orchestration enabled (backend=%s, tool_use=%s). Starting OrchestratorAgent.",
+            orch_cfg.get("backend", "internal"),
+            orch_cfg.get("tool_use", "auto"),
+        )
+        return run_orchestrated_pipeline(args)
+
     return _run_pipeline_with_router(args, llm_router)
 
 
@@ -1099,6 +1109,26 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         logger.info("Mode=scope -- stopping after analysis. Dependency graph: %s", graph_path)
         return 0
 
+    # ---- Memory: initialise store and load context ----
+    _memory_store = None
+    _memory_context = None
+    try:
+        from agents.memory_store import MemoryStore  # noqa: PLC0415
+        _memory_store = MemoryStore()
+        _memory_context = _memory_store.get_context(
+            feature_name=args.feature_name,
+            dependency_graph=dependency_graph,
+            target=target,
+        )
+        if _memory_context.context_summary:
+            logger.info(
+                "Memory context loaded: %d pattern(s), %d preference(s).",
+                len(_memory_context.similar_patterns),
+                len(_memory_context.user_preferences),
+            )
+    except Exception as _mem_exc:  # noqa: BLE001
+        logger.debug("Memory store unavailable (non-fatal): %s", _mem_exc)
+
     # ---- Step 3: Plan Document Generation ----
     print_banner("Step 3: Plan Document Generation")
     plan_agent = _pa.PlanAgent(
@@ -1108,6 +1138,7 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         plans_dir=DEFAULT_PLANS_DIR,
         llm_router=llm_router,
         target=target,
+        memory_context=_memory_context,
     )
     plan_md, plan_path = plan_agent.generate()
     logger.info("[OK] Plan document generated: %s", plan_path)
@@ -1180,6 +1211,7 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         dry_run=args.dry_run,
         llm_router=llm_router,
         target=target,
+        memory_context=_memory_context,
     )
 
     summary = conv_agent.execute()
@@ -1256,6 +1288,22 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
     )
     verification = verification_agent.execute()
 
+    # ---- Knowledge Extraction (always at end, non-fatal) ----
+    if _memory_store and getattr(args, "orchestration_config", {}).get("learning", True):
+        try:
+            from agents.knowledge_extractor import KnowledgeExtractor  # noqa: PLC0415
+            _ke = KnowledgeExtractor(memory_store=_memory_store, llm_router=llm_router)
+            _ke_result = _ke.extract(
+                run_id=run_id,
+                dependency_graph=dependency_graph,
+                conversion_log_path=DEFAULT_LOGS_DIR / f"{run_id}-conversion-log.json",
+                validation_report_path=DEFAULT_LOGS_DIR / f"{run_id}-validation-report.json"
+                if (DEFAULT_LOGS_DIR / f"{run_id}-validation-report.json").exists() else None,
+            )
+            logger.info("Knowledge extracted: %s", _ke_result)
+        except Exception as _ke_exc:  # noqa: BLE001
+            logger.debug("Knowledge extraction failed (non-fatal): %s", _ke_exc)
+
     print_banner("Pipeline Complete")
     print(f"  Feature:      {dependency_graph['feature_name']}")
     print(f"  Run ID:       {run_id}")
@@ -1326,6 +1374,55 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         )
         else 1
     )
+
+
+# ---------------------------------------------------------------------------
+# Orchestrated pipeline (LLM-driven workflow controller)
+# ---------------------------------------------------------------------------
+
+def run_orchestrated_pipeline(args: argparse.Namespace) -> int:
+    """
+    Run the LLM-driven orchestrated pipeline.
+
+    Initialises MemoryStore + OrchestratorAgent, then delegates to the backend
+    selected by orchestration.backend (internal or google_adk).
+
+    Falls back to run_pipeline() if no LLM router is available.
+    """
+    llm_router = getattr(args, "_llm_router_cache", None)
+    if llm_router is None:
+        llm_router = build_llm_router(args)
+
+    # MemoryStore (non-fatal if unavailable)
+    memory_store = None
+    try:
+        from agents.memory_store import MemoryStore  # noqa: PLC0415
+        memory_store = MemoryStore()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("MemoryStore unavailable (non-fatal): %s", exc)
+
+    orch_cfg = getattr(args, "orchestration_config", {}) or {}
+
+    if llm_router is None:
+        logger.warning(
+            "run_orchestrated_pipeline: no LLM router — falling back to sequential pipeline."
+        )
+        return _run_pipeline_with_router(args, None)
+
+    try:
+        from agents.orchestrator_agent import OrchestratorAgent  # noqa: PLC0415
+        orchestrator = OrchestratorAgent(
+            args=args,
+            memory_store=memory_store,
+            llm_router=llm_router,
+            config=orch_cfg,
+        )
+        return orchestrator.execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "OrchestratorAgent failed (%s). Falling back to sequential pipeline.", exc
+        )
+        return _run_pipeline_with_router(args, llm_router)
 
 
 if __name__ == "__main__":

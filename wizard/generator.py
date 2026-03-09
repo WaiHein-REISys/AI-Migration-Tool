@@ -317,6 +317,15 @@ def generate_job_template(answers: dict) -> str:
           max_tokens: null
           temperature: null
 
+        # ── Orchestration ─────────────────────────────────────────────────
+        orchestration:
+          enabled: false           # true = LLM orchestrator; false = sequential pipeline
+          learning: true           # extract patterns + preferences after each run
+          max_plan_revisions: 2
+          escalate_on_fail: true
+          backend: internal        # internal | google_adk
+          tool_use: auto           # auto | never
+
         notes: |
           Source:  {source['framework']} / {source['backend_framework']}
                    Root: {source_root_display}

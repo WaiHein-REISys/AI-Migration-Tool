@@ -38,7 +38,9 @@ import shlex
 import sys
 from typing import TYPE_CHECKING
 
-from agents.llm.base import LLMConfig, LLMMessage, LLMResponse, LLMNotAvailableError
+from agents.llm.base import (
+    LLMConfig, LLMMessage, LLMResponse, LLMNotAvailableError, ToolDefinition,
+)
 
 if TYPE_CHECKING:
     from agents.llm.base import BaseLLMProvider
@@ -54,6 +56,7 @@ PROVIDER_OPENAI_COMPAT   = "openai_compat"   # LM Studio, Azure, vLLM, Ollama /v
 PROVIDER_OLLAMA          = "ollama"
 PROVIDER_LLAMACPP        = "llamacpp"
 PROVIDER_SUBPROCESS      = "subprocess"       # any installed CLI tool
+PROVIDER_VERTEX_AI       = "vertex_ai"        # Google Gemini API / Vertex AI
 
 
 # ---------------------------------------------------------------------------
@@ -88,11 +91,15 @@ def _load_provider(config: LLMConfig) -> "BaseLLMProvider":
         from agents.llm.providers.subprocess_provider import SubprocessProvider
         return SubprocessProvider(config)
 
+    if p == PROVIDER_VERTEX_AI:
+        from agents.llm.providers.vertex_ai_provider import VertexAIProvider
+        return VertexAIProvider(config)
+
     raise ValueError(
         f"Unknown provider '{config.provider}'. "
         f"Valid options: {PROVIDER_ANTHROPIC}, {PROVIDER_OPENAI}, "
         f"{PROVIDER_OPENAI_COMPAT}, {PROVIDER_OLLAMA}, {PROVIDER_LLAMACPP}, "
-        f"{PROVIDER_SUBPROCESS}"
+        f"{PROVIDER_SUBPROCESS}, {PROVIDER_VERTEX_AI}"
     )
 
 
@@ -125,6 +132,30 @@ def probe_available_providers() -> list[dict]:
     import shutil
 
     options: list[dict] = []
+
+    # -- Vertex AI / Gemini API --
+    if os.environ.get("GOOGLE_API_KEY"):
+        model = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
+        cfg = LLMConfig(provider=PROVIDER_VERTEX_AI, model=model,
+                        api_key=os.environ["GOOGLE_API_KEY"])
+        options.append({
+            "provider": PROVIDER_VERTEX_AI,
+            "model":    model,
+            "label":    f"Google Gemini API  [{model}]  (GOOGLE_API_KEY)",
+            "config":   cfg,
+        })
+    elif os.environ.get("GOOGLE_CLOUD_PROJECT"):
+        model = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
+        cfg = LLMConfig(provider=PROVIDER_VERTEX_AI, model=model)
+        options.append({
+            "provider": PROVIDER_VERTEX_AI,
+            "model":    model,
+            "label":    (
+                f"Google Vertex AI  [{model}]  "
+                f"(GOOGLE_CLOUD_PROJECT={os.environ['GOOGLE_CLOUD_PROJECT']})"
+            ),
+            "config":   cfg,
+        })
 
     # -- Anthropic API --
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -439,6 +470,44 @@ class LLMRouter:
     def model_name(self) -> str:
         return self._primary.model_name
 
+    @property
+    def supports_tool_use(self) -> bool:
+        """True if the active provider supports native tool/function calling."""
+        return self._primary.supports_tool_use()
+
+    def complete_with_tools(
+        self,
+        system: str,
+        messages: list[LLMMessage],
+        tools: list[ToolDefinition],
+    ) -> LLMResponse:
+        """
+        Send a completion request with tool definitions (native function-calling).
+        Delegates to the primary provider's complete_with_tools() implementation.
+
+        Returns an LLMResponse with .tool_calls populated when the model chose
+        to invoke a tool, or .text for a regular text response.
+
+        Raises:
+            NotImplementedError: if the primary provider does not support tool-use.
+                Check supports_tool_use first to avoid this.
+        """
+        if not self._primary.is_available:
+            raise LLMNotAvailableError(
+                f"No LLM provider is available. Primary: {self._primary}"
+            )
+        from agents.llm.base import LLMProviderError
+        try:
+            return self._primary.complete_with_tools(system, messages, tools)
+        except LLMProviderError as exc:
+            if self._fallback and self._fallback.is_available:
+                logger.warning(
+                    "Primary provider tool-use error (%s) — retrying with fallback: %s",
+                    exc, self._fallback
+                )
+                return self._fallback.complete_with_tools(system, messages, tools)
+            raise
+
     def complete(
         self,
         system: str,
@@ -525,6 +594,17 @@ class LLMRouter:
             config.provider = PROVIDER_ANTHROPIC
             config.model    = os.environ.get("LLM_MODEL", "claude-opus-4-5")
             config.api_key  = os.environ["ANTHROPIC_API_KEY"]
+
+        # Vertex AI / Gemini (GOOGLE_API_KEY → Gemini API)
+        elif os.environ.get("GOOGLE_API_KEY"):
+            config.provider = PROVIDER_VERTEX_AI
+            config.model    = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
+            config.api_key  = os.environ["GOOGLE_API_KEY"]
+
+        # Vertex AI (GCP service account / ADC)
+        elif os.environ.get("GOOGLE_CLOUD_PROJECT"):
+            config.provider = PROVIDER_VERTEX_AI
+            config.model    = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
 
         # Subprocess: explicit env var
         elif os.environ.get("LLM_SUBPROCESS_CMD"):

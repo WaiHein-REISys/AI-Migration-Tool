@@ -1,291 +1,43 @@
 # AI Migration Tool — Windsurf Agent Rules
 # =========================================
-# Windsurf reads this file to understand how to interact with this project.
-# These rules apply to all Cascade AI interactions in this workspace.
+# Before starting any migration task, read AGENT.md in the repo root.
+# AGENT.md is the canonical workflow reference for this project.
 
-## Project overview
+## Before you start
 
-This is the **AI Migration Tool** — a multi-agent pipeline that migrates
-`HAB-GPRSSubmission` (Angular 2 / ASP.NET Core) to a modern target stack.
-
-Source repo:  <YOUR_SOURCE_ROOT>   (HAB-GPRSSubmission — Angular 2 / ASP.NET Core)
-Target (A):   <YOUR_TARGET_ROOT_A>  (Next.js 15 / APIFlask / SQLAlchemy)
-Target (B):   <YOUR_TARGET_ROOT_B>  (Next.js 16 / Flask 3.0 / psycopg2)
-
-Paths are machine-specific. Run the setup wizard to register your local paths:
-  python run_agent.py --setup
+Read **`AGENT.md`** in the repo root. It contains everything you need:
+- Complete workflow, job file format, all CLI flags
+- Pipeline stages (9 steps), target stacks
+- Orchestration mode and learning memory
+- LLM provider configuration and auto-detection order
+- Important constraints and recommended workflows (human-assisted + autonomous)
 
 ---
 
-## First-run: Configuring a new migration target
+## Critical rules (Windsurf-specific quick reference)
 
-If migrating to a **new/custom stack** not already registered, run the **Setup Wizard**
-before creating job files. The wizard analyses your codebases and generates custom prompts.
-
-```bash
-python run_agent.py --setup                          # interactive
-python run_agent.py --setup --config wizard.json    # pre-filled JSON
-python run_agent.py --setup --dry-run               # preview only
-python run_agent.py --setup --list-targets          # list configured targets
-```
-
-See `agent-prompts/example-wizard-config.json` for the JSON format.
-
-After setup:
-- Custom prompts land in `prompts/plan_system_<id>.txt` etc.
-- Job template is at `agent-prompts/_template_<id>.yaml`
-- Registry is updated at `config/wizard-registry.json`
+- **Entry point:** Always `run_agent.py` — never call `main.py` directly
+- **Output dirs:** Never modify `plans/`, `logs/`, `output/`, `checkpoints/` — pipeline outputs
+- **Mode discipline:** Run `plan` first → review the Plan Document → then `full`
+- **Config:** Never edit `config/skillset-config.json` or `config/rules-config.json` unless asked
+- **Memory files:** `config/memory/*.json` — team-shared, **committed**. Do NOT gitignore.
+- **Registry:** `config/wizard-registry.json` — machine-specific, NOT committed
+- **Dedup:** Use `--force` to re-run a migration that already completed
+- **Orchestration:** `orchestration.enabled: false` (default) = sequential pipeline;
+  set `true` in job YAML to enable the LLM-driven orchestrator (see `AGENT.md`)
 
 ---
 
-## How to run a migration
-
-**Always use `run_agent.py` — never invoke `main.py` directly.**
-
-Migration jobs are self-contained YAML files in `agent-prompts/`.
-
-### List available jobs
-```bash
-python run_agent.py --list-jobs
-```
-
-### Run a job
-```bash
-python run_agent.py --job agent-prompts/migrate-action-history.yaml
-```
-
-### Override flags (can append to any command)
-```bash
---dry-run       # Preview only — no files written to disk
---force         # Ignore the completed-run cache, re-run from scratch
---auto-approve  # Skip human approval (for testing only)
---verbose       # Show DEBUG-level log output
---mode full     # Override pipeline.mode in the YAML (scope | plan | full)
---json          # Machine-readable JSON output (for agent parsing)
-```
-
----
-
-## Agent-interactive commands (Cursor / Windsurf / Copilot / AntiGravity)
-
-These commands enable a fully autonomous, non-interactive agent workflow.
-
-### 1 — Discover available features
-```bash
-python run_agent.py --list-features --source <YOUR_SOURCE_ROOT>
-python run_agent.py --list-features --json   # JSON output for agent parsing
-```
-
-### 2 — Create a job file without any human prompts
-```bash
-python run_agent.py --new-job \
-  --feature ActionHistory \
-  --target snake_case \
-  --non-interactive \
-  --json
-```
-`--feature` resolves as: absolute path → source-relative path → folder name auto-match.
-
-### 3 — Generate the migration plan (no code written)
-```bash
-python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml
-```
-
-### 4 — Check migration status
-```bash
-python run_agent.py --status --job agent-prompts/migrate-actionhistory-snake_case.yaml
-python run_agent.py --status --job agent-prompts/migrate-actionhistory-snake_case.yaml --json
-```
-Returns: plan generated, plan approved, conversion steps completed/pending/blocked.
-
-### 5a — Approve the plan and run full conversion (agent-driven, no TTY needed)
-```bash
-python run_agent.py --approve-plan --job agent-prompts/migrate-actionhistory-snake_case.yaml
-python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml --mode full
-```
-`--approve-plan` writes `output/<feature>/.approved` marker — the pipeline detects it
-and auto-skips the interactive TTY prompt.
-
-### 5b — Revise the plan with feedback (re-generates, clears approval marker)
-```bash
-python run_agent.py --revise-plan \
-  --job agent-prompts/migrate-actionhistory-snake_case.yaml \
-  --feedback "Add migration notes for the data-access layer. Flag pfm-auth imports as BLOCKED."
-```
-Loads the existing dependency graph (no re-scoping). Writes a `-rev.md` plan file.
-Removes the `.approved` marker so the revised plan requires explicit re-approval.
-
----
-
-## Creating a job for a new feature
+## Autonomous workflow (quick reference)
 
 ```bash
-# Option A: Fully automated (agent mode)
-python run_agent.py --new-job \
-  --feature MyFeature --target snake_case \
-  --non-interactive --json
-
-# Option B: Manual template copy
-# 1. Check available targets (run setup wizard first if target not listed)
-python run_agent.py --setup --list-targets
-
-# 2. Copy the right template
-cp agent-prompts/_template_<target_id>.yaml agent-prompts/migrate-MyFeature.yaml
-
-# 3. Edit the file — set at minimum:
-#    pipeline.feature_root  (absolute path to the legacy feature folder)
-#    pipeline.feature_name  (e.g. "MyFeature")
-#    pipeline.mode          (plan | scope | full)
-#    pipeline.target        (simpler_grants | hrsa_pprs | <custom_target_id>)
-
-# 4. Run it
-python run_agent.py --job agent-prompts/migrate-MyFeature.yaml
-```
-
----
-
-## Job file structure reference
-
-```yaml
-job:
-  name: "Human-readable job name"
-  description: "What this migration does"
-
-pipeline:
-  feature_root:  "<YOUR_SOURCE_ROOT>/src/.../FeatureName"
-  feature_name:  "FeatureName"
-  mode:          "plan"           # scope | plan | full
-  target:        "snake_case"     # simpler_grants | hrsa_pprs | snake_case | <custom>
-  dry_run:       false
-  auto_approve:  false
-  force:         false
-  output_root:   null             # null → default output/<feature_name>/
-
-llm:
-  no_llm:    false   # true = template-only scaffold, no API key required
-  provider:  null    # null = auto-detect (anthropic|openai|ollama|openai_compat|llamacpp)
-  model:     null    # null = provider default
-  base_url:  null    # OpenAI-compatible server URL
-  model_path: null   # Path to local GGUF file (llamacpp only)
-  ollama_host: null  # Ollama server URL (default: http://localhost:11434)
-  max_tokens: null   # Max tokens per LLM call (default: 8192)
-  temperature: null  # Sampling temperature (default: 0.2)
-
-notes: |
-  Context for agent / reviewer. E.g.:
-  - Known pfm-* platform library dependencies
-  - Cross-feature imports requiring human review
-  - Expected output file paths
-```
-
----
-
-## Pipeline stages
-
-| Step | Agent | Output |
-|---|---|---|
-| 1. Config Ingestion | `ConfigIngestionAgent` | Validated config dict |
-| 2. Scoping | `ScopingAgent` | `logs/<run-id>-dependency-graph.json` |
-| 3. Plan Generation | `PlanAgent` | `plans/<feature>-plan-<ts>.md` |
-| 4. Human/Agent Approval | `ApprovalGate` | CLI `yes` OR `output/<feature>/.approved` marker |
-| 5. Conversion | `ConversionAgent` | `output/<feature>/` + `logs/<run-id>-conversion-log.*` |
-
----
-
-## Target stacks
-
-| `pipeline.target` | Frontend | Backend | Database |
-|---|---|---|---|
-| `simpler_grants` | Next.js 15 / React 19 | APIFlask Blueprints | SQLAlchemy 2.0 `Mapped[]` |
-| `hrsa_pprs` | Next.js 16 / React 18 | Flask 3.0 Blueprints | psycopg2 raw SQL |
-| `snake_case` | Next.js / TypeScript | Flask 3.0 / snake_case naming | Custom SQL scripts |
-| `<custom>` | Wizard-configured | Wizard-configured | Wizard-configured |
-
----
-
-## Important constraints
-
-- **Do NOT modify** `plans/`, `logs/`, `output/`, `checkpoints/` — pipeline outputs
-- **Do NOT edit** `config/skillset-config.json` or `config/rules-config.json` unless asked
-- **Prompts** under `prompts/` are plain text — safe to read and suggest edits
-- **`mode: plan` is the safe default** — generates a Plan Document with no code changes
-- **`mode: full`** writes code — always verify the plan first
-- **Dedup**: if a run for this feature+target already completed, the pipeline skips automatically; use `--force` to override
-
----
-
-## LLM configuration
-
-Auto-detection order (first found wins):
-```
-ANTHROPIC_API_KEY → OPENAI_API_KEY → OLLAMA_MODEL → LLM_BASE_URL → LLAMACPP_MODEL_PATH
-```
-
-No API key? Set `llm.no_llm: true` for template-only scaffold mode.
-
-### LLM failure behaviour
-
-| Context | Behaviour |
-|---|---|
-| Run via `run_agent.py` (agent mode) | Soft-fail — returns Jinja2 template scaffold so you can continue |
-| Run via `main.py` (CLI / human) | Hard-fail — raises `LLMConfigurationError` with actionable instructions |
-
-`run_agent.py` automatically sets `AI_AGENT_MODE=1` before calling the pipeline.
-You can also force agent mode manually:
-```bash
-set AI_AGENT_MODE=1       # Windows CMD
-$env:AI_AGENT_MODE=1      # PowerShell
-export AI_AGENT_MODE=1    # bash/zsh
-```
-
----
-
-## Recommended workflow (human-assisted)
-
-When a user asks to "migrate FeatureName":
-
-1. Check configured targets: `python run_agent.py --setup --list-targets`
-2. If the target doesn't exist, run the setup wizard: `python run_agent.py --setup`
-3. Check: `ls agent-prompts/migrate-featurename*.yaml`
-4. If no job file exists: copy `_template_<target>.yaml`, fill in the values
-5. Run plan mode: `python run_agent.py --job agent-prompts/migrate-featurename.yaml`
-6. Tell the user where the Plan Document was saved (`plans/`)
-7. Wait for the user to review and confirm before running `full` mode
-8. Run full mode: `python run_agent.py --job ... --mode full`
-9. Check conversion results: `logs/<run-id>-conversion-log.md`
-
-## Recommended workflow (autonomous agent mode)
-
-When operating autonomously (Windsurf Cascade, Cursor, Copilot, AntiGravity):
-
-```bash
-# 1. Discover features
 python run_agent.py --list-features --json
-
-# 2. Create job file (non-interactive)
-python run_agent.py --new-job --feature ActionHistory --target snake_case \
+python run_agent.py --new-job --feature <Name> --target snake_case \
                     --non-interactive --json
-
-# 3. Generate plan
-python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml
-
-# 4. Check status
-python run_agent.py --status --job agent-prompts/migrate-actionhistory-snake_case.yaml --json
-
-# 5a. Approve + convert
-python run_agent.py --approve-plan --job agent-prompts/migrate-actionhistory-snake_case.yaml
-python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml --mode full
-
-# 5b. Or revise with feedback
-python run_agent.py --revise-plan --job agent-prompts/migrate-actionhistory-snake_case.yaml \
-                    --feedback "Flag all pfm-auth imports as BLOCKED."
-# Then re-approve and re-run
+python run_agent.py --job agent-prompts/migrate-<name>-snake_case.yaml
+python run_agent.py --status --job agent-prompts/migrate-<name>-snake_case.yaml --json
+python run_agent.py --approve-plan --job agent-prompts/migrate-<name>-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-<name>-snake_case.yaml --mode full
 ```
 
-When a user asks to "configure a new migration target" or "set up migration to X":
-
-1. Run the setup wizard: `python run_agent.py --setup`
-   - Or for CI/agent mode: fill in `agent-prompts/example-wizard-config.json`
-     then: `python run_agent.py --setup --config wizard-config.json --non-interactive`
-2. Review generated prompts in `prompts/` (safe to edit for tuning)
-3. Use the generated `agent-prompts/_template_<target_id>.yaml` for migrations
+See `AGENT.md` for the full command reference, job file YAML format, and detailed workflows.

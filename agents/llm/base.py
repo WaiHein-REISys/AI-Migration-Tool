@@ -45,6 +45,32 @@ class LLMResponse:
     input_tokens: int  = 0
     output_tokens: int = 0
     raw: Any           = field(default=None, repr=False)
+    # Populated only when the provider responds with native tool/function calls.
+    # None for all standard text-completion responses (backwards-compatible).
+    tool_calls: "list[ToolCall] | None" = field(default=None, repr=False)
+
+
+@dataclass
+class ToolDefinition:
+    """
+    Provider-agnostic tool / function definition.
+    Each orchestrator action is described as a ToolDefinition when
+    calling complete_with_tools() on providers that support it.
+    """
+    name: str
+    description: str
+    parameters: dict  # JSON Schema object describing the tool's input
+
+
+@dataclass
+class ToolCall:
+    """
+    A single tool-call result returned by the LLM in native tool-use mode.
+    Populated in LLMResponse.tool_calls by providers that support it.
+    """
+    tool_name: str
+    tool_input: dict
+    tool_call_id: str | None = None  # populated by Anthropic / OpenAI, None for Gemini
 
 
 @dataclass
@@ -139,6 +165,42 @@ class BaseLLMProvider(abc.ABC):
             LLMProviderError: on API / SDK / timeout errors.
             LLMNotAvailableError: if provider is not configured (no key/path).
         """
+
+    # ------------------------------------------------------------------
+    # Optional tool-use interface (providers override to enable native
+    # function-calling; default implementations keep all existing code
+    # working without change)
+    # ------------------------------------------------------------------
+
+    def supports_tool_use(self) -> bool:
+        """
+        Return True if this provider supports native tool / function calling
+        via complete_with_tools().  Default: False (text-only providers).
+        """
+        return False
+
+    def complete_with_tools(
+        self,
+        system: str,
+        messages: list[LLMMessage],
+        tools: list[ToolDefinition],
+    ) -> LLMResponse:
+        """
+        Send a completion request with tool/function definitions.
+        The LLM may respond by requesting a tool call instead of text.
+
+        Returns an LLMResponse whose .tool_calls list is populated when
+        the model chose to invoke a tool, or .text is populated for a
+        regular text response.
+
+        Raises:
+            NotImplementedError: if the provider does not support tool-use.
+                Override this method in providers that support it.
+        """
+        raise NotImplementedError(
+            f"{self.provider_name!r} does not support native tool-use. "
+            "Use the react_text orchestration mode instead."
+        )
 
     # ------------------------------------------------------------------
     # Common helpers

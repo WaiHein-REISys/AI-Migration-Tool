@@ -1,5 +1,14 @@
 # CLAUDE.md — Claude Code Instructions
 
+> **See `AGENT.md`** in the repo root for the canonical workflow reference —
+> job file format, pipeline stages, target stacks, LLM configuration,
+> orchestration mode, and all recommended workflows.
+>
+> This file contains only Claude Code-specific rules (working directory,
+> worktrees, venv, commit workflow, guardrail editing).
+
+---
+
 ## Working directory
 
 **Always make code changes directly in the repository root:**
@@ -58,6 +67,7 @@ pipeline. Never edit files in these directories.
 | `config/skillset-config.json` | Do not edit unless explicitly asked |
 | `config/rules-config.json` | Do not edit unless explicitly asked |
 | `config/wizard-registry.json` | Machine-specific — in `.gitignore`, do not commit |
+| `config/memory/*.json` | Team-shared learning memory — **commit these** |
 
 ### Prompt files — safe to edit
 `prompts/*.txt` and `prompts/*.md` control LLM behaviour and are safe to read
@@ -139,11 +149,13 @@ For `--list-features` to detect features, source files must be organised into
 
 Auto-detected from environment variables (first found wins):
 ```
-ANTHROPIC_API_KEY → OPENAI_API_KEY → OLLAMA_MODEL → LLM_BASE_URL → LLAMACPP_MODEL_PATH
+ANTHROPIC_API_KEY → OPENAI_API_KEY → GOOGLE_API_KEY (Gemini) → GOOGLE_CLOUD_PROJECT (Vertex AI) → OLLAMA_MODEL → LLM_BASE_URL → LLAMACPP_MODEL_PATH
 ```
 
 Use `llm.no_llm: true` in the job file for template-only scaffold mode — no API
 key required. Useful for demos and CI.
+
+See `AGENT.md` for the full LLM provider reference and failure behaviour.
 
 ---
 
@@ -154,10 +166,9 @@ key required. Useful for demos and CI.
 | Entry point | Always `run_agent.py`, never `main.py` |
 | Output dirs | `plans/`, `logs/`, `output/`, `checkpoints/`, `reports/` — read-only |
 | wizard-registry.json | Machine-specific — do not commit |
+| config/memory/*.json | Team-shared learning memory — **commit these** |
 | New targets | Wizard or manual prompt file drop — zero Python changes |
 | New guardrails | `config/rules-config.json` only — zero Python changes |
 | Mode order | `plan` → review → `full` |
 | auto_approve | Testing/demo only |
 | Working dir | Repo root only — never `.claude/` or worktrees |
-
-See `.github/copilot-instructions.md` for the full command reference and workflows.

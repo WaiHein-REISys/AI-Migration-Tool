@@ -125,14 +125,16 @@ class ConversionAgent:
         dry_run: bool = False,
         llm_router: "LLMRouter | None" = None,
         target: str = "simpler_grants",
+        memory_context: "Any | None" = None,
     ) -> None:
-        self.plan        = approved_plan
-        self.config      = config
-        self.log         = log
-        self.output_root = Path(output_root)
-        self.dry_run     = dry_run
-        self._router     = llm_router
-        self.target      = target
+        self.plan            = approved_plan
+        self.config          = config
+        self.log             = log
+        self.output_root     = Path(output_root)
+        self.dry_run         = dry_run
+        self._router         = llm_router
+        self.target          = target
+        self._memory_context = memory_context
 
         # Resolve prompt filenames dynamically — no hardcoded map.
         self._system_prompt_file = resolve_prompt_filename(
@@ -384,13 +386,33 @@ class ConversionAgent:
             if template_context else ""
         )
 
+        # -- Memory context: inject proven patterns for this step's imports --
+        memory_hint = ""
+        if self._memory_context:
+            source_imports = step.get("source_imports", [])
+            source_hooks   = step.get("source_hooks", [])
+            try:
+                matches = self._memory_context.similar_patterns[:3] if source_imports else []
+                if matches:
+                    lines = ["PROVEN PATTERNS FROM PREVIOUS MIGRATIONS:"]
+                    for p in matches:
+                        src_sig = p.get("source_signature", "")
+                        tgt_sig = p.get("target_signature", "")
+                        if src_sig and tgt_sig:
+                            lines.append(f"- {src_sig} → {tgt_sig}")
+                    if len(lines) > 1:
+                        memory_hint = "\n\n" + "\n".join(lines)
+            except Exception:  # noqa: BLE001
+                pass
+
         user_message = (
             f"Convert the following source file to the target stack.\n"
             f"Conversion Step: {step['id']}\n"
             f"Source file: `{step['source_file']}`\n"
             f"Target file: `{step['target_file']}`\n"
             f"Rationale: {step.get('rationale', '')}\n"
-            f"{template_hint}\n"
+            f"{template_hint}"
+            f"{memory_hint}\n"
             f"SOURCE CODE:\n```\n{source_code}\n```\n\n"
             f"Output ONLY the converted code. No markdown fences."
         )

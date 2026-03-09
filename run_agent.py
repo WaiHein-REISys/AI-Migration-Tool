@@ -248,6 +248,16 @@ def _job_to_args(job: dict, overrides: dict | None = None) -> argparse.Namespace
             "generate_stories":        _get(job.get("ui_consistency", {}), "generate_stories",        False),
             "fail_on_missing_classes": _get(job.get("ui_consistency", {}), "fail_on_missing_classes", True),
         },
+
+        # --- Orchestration (LLM-driven workflow controller) ---
+        orchestration_config = {
+            "enabled":            _get(job.get("orchestration", {}), "enabled",            False),
+            "learning":           _get(job.get("orchestration", {}), "learning",            True),
+            "max_plan_revisions": _get(job.get("orchestration", {}), "max_plan_revisions",  2),
+            "escalate_on_fail":   _get(job.get("orchestration", {}), "escalate_on_fail",    True),
+            "backend":            _get(job.get("orchestration", {}), "backend",             "internal"),
+            "tool_use":           _get(job.get("orchestration", {}), "tool_use",            "auto"),
+        },
     )
 
     # Default feature_name from feature_root stem if not set
