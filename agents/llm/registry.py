@@ -15,7 +15,7 @@ Supported providers:
                      (Azure OpenAI, LM Studio, vLLM, Ollama /v1, etc.)
     "ollama"       – Ollama REST API (native, no OpenAI compat required)
     "llamacpp"     – Local .gguf model via llama-cpp-python
-    "subprocess"   – Any installed CLI tool (claude --print, codex --quiet, etc.)
+    "subprocess"   – Any installed CLI tool (claude --print, codex exec, etc.)
 
 Usage:
     from agents.llm.registry import LLMRouter, LLMConfig
@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import sys
 from typing import TYPE_CHECKING
 
@@ -207,7 +208,7 @@ def probe_available_providers() -> list[dict]:
     # -- Subprocess: auto-detect well-known CLIs --
     for cli_name, cli_label in [
         ("claude", "Claude Code CLI  (claude --print)"),
-        ("codex",  "OpenAI Codex CLI  (codex --quiet)"),
+        ("codex",  "OpenAI Codex CLI  (codex exec)"),
     ]:
         # Skip if already added via LLM_SUBPROCESS_CMD
         already = any(
@@ -409,6 +410,8 @@ class LLMRouter:
                 config.model = new_cmd   # replace old placeholder with new one
             config.provider        = PROVIDER_SUBPROCESS
             config.subprocess_cmd  = new_cmd
+        if getattr(args, "llm_subprocess_args", None):
+            config.subprocess_args = list(args.llm_subprocess_args)
         if getattr(args, "llm_subprocess_env", None):
             config.subprocess_env  = dict(args.llm_subprocess_env)
 
@@ -567,5 +570,13 @@ class LLMRouter:
             config.temperature = float(os.environ["LLM_TEMPERATURE"])
         if os.environ.get("LLM_API_VERSION"):
             config.api_version = os.environ["LLM_API_VERSION"]
+        if os.environ.get("LLM_SUBPROCESS_ARGS"):
+            try:
+                config.subprocess_args = shlex.split(os.environ["LLM_SUBPROCESS_ARGS"])
+            except ValueError:
+                logger.warning(
+                    "Invalid LLM_SUBPROCESS_ARGS value; using whitespace split fallback."
+                )
+                config.subprocess_args = os.environ["LLM_SUBPROCESS_ARGS"].split()
 
         return config

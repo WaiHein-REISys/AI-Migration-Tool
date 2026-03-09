@@ -4,7 +4,7 @@
 # LLM:    OpenAI Codex CLI  (subprocess provider)
 # ============================================================
 # Run with:
-#   python run_agent.py --job agent-prompts/migrate-commands-hrsa_simpler_pprs_repo_codex.yaml
+#   python run_agent.py --job agent-prompts/migrate-commands-hrsa_simpler_pprs_repo-codex.yaml
 # ============================================================
 
 job:
@@ -58,9 +58,11 @@ llm:
   timeout: 180
 
   # Use the codex CLI — profile in subprocess_provider.py handles
-  # `codex exec - --ephemeral --dangerously-bypass-approvals-and-sandbox
-  #                -s read-only --json`
+  # `codex exec - --ephemeral --full-auto -s read-only --json`
   subprocess_cmd: "codex"
+  subprocess_args:
+    - -c
+    - 'reasoning_effort="medium"'
 
   # subprocess_env: inject OPENAI_API_KEY if not already in the environment.
   # Values support ${VAR} expansion — keep secrets in host env, not here.

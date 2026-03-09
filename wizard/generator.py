@@ -283,6 +283,15 @@ def generate_job_template(answers: dict) -> str:
           add_dependencies: true   # auto-add missing Python deps to requirements.txt
           generate_migration: true # generate DB migration script if model changes detected
 
+        # ── End-to-End Verification (Stage 8) ───────────────────────────────────
+        # Runs command-based checks (build/test/lint) after integration.
+        verification:
+          enabled: false
+          cwd: null                # null => target_root when set, else output_root
+          commands: []             # e.g. ["npm ci", "npm test", "pytest -q"]
+          env: {{}}
+          fail_on_error: true
+
         llm:
           # null = auto-detect from environment variables
           provider: null   # anthropic | openai | openai_compat | ollama | llamacpp

@@ -109,6 +109,28 @@ integration:
   generate_migration: true
 
 # ─────────────────────────────────────────────
+# verification — Stage 8 settings (end-to-end checks)
+# ─────────────────────────────────────────────
+verification:
+
+  # false = skip Stage 8 command-based verification.
+  enabled: false
+
+  # Working directory for commands. null = target_root if available,
+  # otherwise output_root.
+  cwd: null
+
+  # Commands run in order. Use project-native checks here
+  # (examples: npm test, npm run build, pytest, dotnet test).
+  commands: []
+
+  # Optional env vars for verification commands.
+  env: {}
+
+  # true = stop on first failing command and fail the pipeline.
+  fail_on_error: true
+
+# ─────────────────────────────────────────────
 # llm — LLM provider settings
 # ─────────────────────────────────────────────
 llm:
@@ -183,6 +205,10 @@ notes: |
 | `integration.enabled` | `true` | Set `false` to skip Stage 7 entirely |
 | `integration.add_dependencies` | `true` | Auto-append missing Python deps to `requirements.txt` |
 | `integration.generate_migration` | `true` | Generate DB migration script on schema changes |
+| `verification.enabled` | `false` | Set `true` to run Stage 8 command-based verification |
+| `verification.cwd` | `null` | Defaults to `target_root`, then `output_root` |
+| `verification.commands` | `[]` | Ordered shell commands for build/test/lint verification |
+| `verification.fail_on_error` | `true` | Fail pipeline immediately on first failing command |
 | `llm.no_llm` | `false` | |
 | `llm.provider` | auto-detect | |
 | `llm.model` | provider default | |

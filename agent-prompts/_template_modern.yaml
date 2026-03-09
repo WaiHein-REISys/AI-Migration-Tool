@@ -58,6 +58,14 @@ integration:
   add_dependencies: true   # auto-add missing Python deps to requirements.txt
   generate_migration: true # generate DB migration script if model changes detected
 
+# Stage 8: command-based end-to-end verification (build/test/lint)
+verification:
+  enabled: false
+  cwd: null                # null => target_root when set, else output_root
+  commands: []             # e.g. ["npm ci", "npm test", "pytest -q"]
+  env: {}
+  fail_on_error: true
+
 llm:
   # null = auto-detect from environment variables
   provider: null   # anthropic | openai | openai_compat | ollama | llamacpp

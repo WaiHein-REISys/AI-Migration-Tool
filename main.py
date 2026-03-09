@@ -62,6 +62,7 @@ from agents.scoping_agent import ScopingAgent
 from agents.plan_agent import PlanAgent
 from agents.conversion_agent import ConversionAgent, AmbiguityException
 from agents.conversion_log import ConversionLog
+from agents.e2e_verification_agent import E2EVerificationAgent
 from agents.validation_agent import ValidationAgent
 from agents.approval_gate import (
     ApprovalGate,
@@ -502,6 +503,18 @@ def run_pipeline(args: argparse.Namespace) -> int:
         validation_findings=validation.get("findings", []),
     )
 
+    # ---- Step 8: End-to-End Verification ----
+    print_banner("Step 8: End-to-End Verification")
+    verification_agent = E2EVerificationAgent(
+        run_id=run_id,
+        logs_dir=DEFAULT_LOGS_DIR,
+        output_root=approved_plan["output_root"],
+        target_root=_target_root,
+        verification_config=getattr(args, "verification_config", {}),
+        dry_run=args.dry_run,
+    )
+    verification = verification_agent.execute()
+
     # Print summary (success confirmed only after validation and integration)
     print_banner("Pipeline Complete")
     print(f"  Feature:      {dependency_graph['feature_name']}")
@@ -519,6 +532,10 @@ def run_pipeline(args: argparse.Namespace) -> int:
         print(f"  Integration:  {integration['status']} ({_placed} file(s) placed)")
         if integration.get("report_json"):
             print(f"  IntegrationR: {integration['report_json']}")
+    if verification.get("status") not in {"skipped_disabled", "skipped_no_commands"}:
+        print(f"  E2E Verify:   {verification.get('status')}")
+        if verification.get("report_json"):
+            print(f"  E2EReport:    {verification['report_json']}")
     print(f"  Output:       {approved_plan['output_root']}")
     print(f"  Log (JSON):   {log_path}")
     print(f"  Log (MD):     {md_log_path}")
@@ -544,6 +561,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
         for finding in validation.get("findings", []):
             if finding.get("status") != "PASS":
                 logger.error("   [%s] %s", finding.get("step"), finding.get("reason"))
+    if verification.get("status") == "failed":
+        logger.error("[X] End-to-end verification failed. Review the E2E report.")
 
     return (
         0
@@ -551,6 +570,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
             summary["flagged"] == 0
             and validation["status"] != "failed"
             and integration.get("status") not in {"partial"}
+            and verification.get("status") != "failed"
         )
         else 1
     )
@@ -912,6 +932,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     llm_group.add_argument(
+        "--llm-subprocess-args",
+        nargs="+",
+        default=None,
+        metavar="ARG",
+        help=(
+            "Extra args appended to the subprocess LLM command. "
+            "Example: --llm-subprocess-args -c 'reasoning_effort=\"high\"'"
+        ),
+    )
+    llm_group.add_argument(
         "--select-llm",
         action="store_true",
         help=(
@@ -1170,6 +1200,18 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         validation_findings=validation.get("findings", []),
     )
 
+    # ---- Step 8: End-to-End Verification ----
+    print_banner("Step 8: End-to-End Verification")
+    verification_agent = E2EVerificationAgent(
+        run_id=run_id,
+        logs_dir=DEFAULT_LOGS_DIR,
+        output_root=approved_plan["output_root"],
+        target_root=_target_root,
+        verification_config=getattr(args, "verification_config", {}),
+        dry_run=args.dry_run,
+    )
+    verification = verification_agent.execute()
+
     print_banner("Pipeline Complete")
     print(f"  Feature:      {dependency_graph['feature_name']}")
     print(f"  Run ID:       {run_id}")
@@ -1187,6 +1229,10 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         print(f"  Integration:  {integration['status']} ({_placed} file(s) placed)")
         if integration.get("report_json"):
             print(f"  IntegrationR: {integration['report_json']}")
+    if verification.get("status") not in {"skipped_disabled", "skipped_no_commands"}:
+        print(f"  E2E Verify:   {verification.get('status')}")
+        if verification.get("report_json"):
+            print(f"  E2EReport:    {verification['report_json']}")
     print(f"  Output:       {approved_plan['output_root']}")
     print(f"  Log (JSON):   {log_path}")
     print(f"  Log (MD):     {md_log_path}")
@@ -1212,6 +1258,8 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         for finding in validation.get("findings", []):
             if finding.get("status") != "PASS":
                 logger.error("   [%s] %s", finding.get("step"), finding.get("reason"))
+    if verification.get("status") == "failed":
+        logger.error("[X] End-to-end verification failed. Review the E2E report.")
 
     return (
         0
@@ -1219,6 +1267,7 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
             summary["flagged"] == 0
             and validation["status"] != "failed"
             and integration.get("status") not in {"partial"}
+            and verification.get("status") != "failed"
         )
         else 1
     )

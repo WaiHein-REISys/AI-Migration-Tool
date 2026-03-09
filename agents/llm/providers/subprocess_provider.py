@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from typing import Optional
@@ -62,21 +63,18 @@ _CLI_PROFILES: dict[str, dict] = {
         "model_flag": "--model",   # supports --model <name> for optional override
     },
     "codex": {
-        # exec                            — non-interactive subcommand
-        # -                               — read prompt from stdin
-        # --ephemeral                     — don't write session files between calls
-        # --dangerously-bypass-approvals-and-sandbox
-        #                                 — skip interactive "Allow?" prompts (headless)
-        # -s read-only                    — sandbox: no filesystem writes by the agent
-        # -c reasoning_effort="medium"    — use medium reasoning for speed (~15-30 s/call);
-        #   the default "high" effort can take 3+ min per call.  For max quality,
-        #   override with model: "o3" in the job YAML (high effort + best model).
-        # --json                          — emit JSONL events; response extracted via
-        #                                   output_format="codex_jsonl" (see _extract_text)
+        # exec                         — non-interactive subcommand
+        # -                            — read prompt from stdin
+        # --ephemeral                  — don't write session files between calls
+        # --full-auto                  — non-interactive auto-execution mode
+        # -s read-only                 — keep filesystem read-only for migration safety
+        # reasoning_effort             — set per job via llm.subprocess_args, e.g.
+        #                                ["-c", "reasoning_effort=\"medium\""]
+        # --json                       — emit JSONL events; response extracted via
+        #                                output_format="codex_jsonl" (see _extract_text)
         "args":         ["exec", "--ephemeral",
-                         "--dangerously-bypass-approvals-and-sandbox",
+                         "--full-auto",
                          "-s", "read-only",
-                         "-c", 'reasoning_effort="medium"',
                          "--json", "-"],
         "stdin":        True,
         "model_flag":   "-m",
@@ -150,7 +148,20 @@ class SubprocessProvider(BaseLLMProvider):
         self._profile  = _CLI_PROFILES.get(self._cmd_name, _GENERIC_PROFILE)
 
         extra_env = os.environ.get("LLM_SUBPROCESS_ARGS", "")
-        self._extra_args: list[str] = extra_env.split() if extra_env else []
+        if self.config.subprocess_args:
+            self._extra_args = list(self.config.subprocess_args)
+        elif extra_env:
+            try:
+                self._extra_args = shlex.split(extra_env)
+            except ValueError:
+                logger.warning(
+                    "SubprocessProvider: failed to parse LLM_SUBPROCESS_ARGS=%r with shlex; "
+                    "falling back to whitespace split.",
+                    extra_env,
+                )
+                self._extra_args = extra_env.split()
+        else:
+            self._extra_args = []
 
         if os.environ.get("CLAUDECODE") and self._cmd_name == "claude":
             logger.warning(

@@ -223,6 +223,7 @@ def _job_to_args(job: dict, overrides: dict | None = None) -> argparse.Namespace
         llm_temperature     = _get(llm, "temperature"),
         llm_timeout         = _get(llm, "timeout"),
         llm_subprocess_cmd  = _get(llm, "subprocess_cmd"),
+        llm_subprocess_args = _get(llm, "subprocess_args", []),
         llm_subprocess_env  = _get(llm, "subprocess_env", {}),  # {KEY: val} injected into subprocess
         select_llm          = False,   # never auto-trigger picker from job files
 
@@ -232,6 +233,13 @@ def _job_to_args(job: dict, overrides: dict | None = None) -> argparse.Namespace
             "enabled":            _get(job.get("integration", {}), "enabled",            True),
             "add_dependencies":   _get(job.get("integration", {}), "add_dependencies",   True),
             "generate_migration": _get(job.get("integration", {}), "generate_migration", True),
+        },
+        verification_config = {
+            "enabled":       _get(job.get("verification", {}), "enabled", False),
+            "cwd":           _get(job.get("verification", {}), "cwd"),
+            "commands":      _get(job.get("verification", {}), "commands", []),
+            "env":           _get(job.get("verification", {}), "env", {}),
+            "fail_on_error": _get(job.get("verification", {}), "fail_on_error", True),
         },
     )
 
@@ -1182,6 +1190,16 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--llm-subprocess-args",
+        nargs="+",
+        default=None,
+        metavar="ARG",
+        help=(
+            "Extra args appended to the subprocess LLM command. "
+            "Example: --llm-subprocess-args -c 'reasoning_effort=\"high\"'"
+        ),
+    )
+    parser.add_argument(
         "--select-llm",
         action="store_true",
         help=(
@@ -1268,6 +1286,9 @@ def main() -> int:
     if getattr(args, "llm_subprocess_cmd", None):
         ns.llm_subprocess_cmd = args.llm_subprocess_cmd
         ns.llm_provider       = "subprocess"
+    if getattr(args, "llm_subprocess_args", None):
+        ns.llm_subprocess_args = list(args.llm_subprocess_args)
+        ns.llm_provider = "subprocess"
     if getattr(args, "select_llm", False):
         ns.select_llm = True
 

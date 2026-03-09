@@ -1,6 +1,6 @@
 # Pipeline Stages
 
-The pipeline has seven sequential stages plus an optional plan revision step.
+The pipeline has eight sequential stages plus an optional plan revision step.
 All stages are orchestrated by `main.py` and controlled by the `pipeline.mode` setting.
 
 | Stage | Mode | Description |
@@ -13,6 +13,7 @@ All stages are orchestrated by `main.py` and controlled by the `pipeline.mode` s
 | 5. Conversion | `full` | LLM converts each file |
 | 6. Validation Simulation | `full` | File checks + LLM-based old-vs-new behavior simulation before success |
 | 7. Integration & Placement | `full` | Places converted files into `target_root`, syncs deps, verifies structure, generates migration scripts |
+| 8. End-to-End Verification | `full` | Runs configured shell commands (build/test/lint/e2e) against converted/integrated code |
 
 ---
 
@@ -311,10 +312,54 @@ Pass `--force` to bypass and re-run from scratch.
 
 ---
 
+## Stage 8 — End-to-End Verification
+
+**Agent:** `E2EVerificationAgent`
+
+**Inputs:**
+- `verification.enabled`
+- `verification.cwd` (optional)
+- `verification.commands[]`
+- `verification.env` (optional)
+- `verification.fail_on_error`
+- `target_root` / `output_root` (for default working directory selection)
+
+**Guard checks (in order):**
+1. `verification.enabled: false` → returns `status: skipped_disabled`
+2. `dry_run: true` → returns `status: skipped_dry_run`
+3. `verification.commands` empty → returns `status: skipped_no_commands`
+4. resolved working directory missing → returns `status: skipped_missing_cwd`
+
+**What it does:**
+1. Resolves working directory:
+   - `verification.cwd` if set
+   - else `target_root` when available
+   - else `output_root`
+2. Executes each configured command in order using that working directory
+3. Captures `exit_code`, duration, stdout/stderr snippets per command
+4. Writes reports:
+   - `logs/<run-id>-e2e-verification-report.json`
+   - `logs/<run-id>-e2e-verification-report.md`
+5. Fails pipeline when a command fails and `fail_on_error: true`
+
+**Status values:**
+
+| Status | Meaning |
+|---|---|
+| `passed` | All commands succeeded |
+| `failed` | At least one command failed and `fail_on_error: true` |
+| `completed_with_failures` | One or more commands failed but `fail_on_error: false` |
+| `skipped_disabled` | `verification.enabled: false` |
+| `skipped_no_commands` | No commands configured |
+| `skipped_missing_cwd` | Verification working directory does not exist |
+| `skipped_dry_run` | Dry run mode |
+
+---
+
 ## Mode Reference
 
 | `pipeline.mode` | Stages executed |
 |---|---|
 | `scope` | 1 → 2 |
 | `plan` | 1 → 2 → 3 |
-| `full` | 1 → 2 → 3 → 4 → 5 → 6 → 7 |
+| `full` | 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 |

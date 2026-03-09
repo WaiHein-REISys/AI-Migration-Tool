@@ -44,6 +44,14 @@ pipeline:
   # true = ignore completed-run cache, re-run from scratch
   force: false
 
+# Stage 8: command-based end-to-end verification
+verification:
+  enabled: false
+  cwd: null
+  commands: []
+  env: {}
+  fail_on_error: true
+
 llm:
   # null = auto-detect from environment variables
   provider: ollama   # anthropic | openai | openai_compat | ollama | llamacpp
