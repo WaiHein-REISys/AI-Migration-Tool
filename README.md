@@ -141,6 +141,50 @@ See [Setup Wizard](docs/Setup-Wizard.md) for the full guide.
 
 **Always use `run_agent.py` — do not call `main.py` directly from agent mode.**
 
+### One-command automated run
+
+The fastest way to run the full pipeline with no manual steps:
+
+```bash
+# No API key required — template scaffold mode
+./run_full.sh
+
+# With a real LLM — auto-detects provider from environment variables
+export ANTHROPIC_API_KEY=sk-ant-...            # Anthropic Claude
+./run_full.sh --llm
+
+export OPENAI_API_KEY=sk-...                  # OpenAI GPT
+./run_full.sh --llm
+
+export OLLAMA_MODEL=llama3.2                  # Ollama (local, no key needed)
+./run_full.sh --llm
+
+export LLM_BASE_URL=http://localhost:1234/v1  # LM Studio / vLLM / Azure
+./run_full.sh --llm
+
+export LLAMACPP_MODEL_PATH=/path/to/model.gguf  # llama.cpp local GGUF
+./run_full.sh --llm
+
+export LLM_SUBPROCESS_CMD=claude              # Claude Code CLI or Codex CLI
+./run_full.sh --llm
+
+# Explicit provider (overrides auto-detection)
+./run_full.sh --llm --provider openai
+
+# Custom job file
+./run_full.sh --job agent-prompts/migrate-actionhistory-modern.yaml
+
+# Additional flags
+./run_full.sh --verbose       # debug output
+./run_full.sh --dry-run       # logs only, no files written
+./run_full.sh --force         # ignore resume cache, re-run from scratch
+```
+
+`run_full.sh` auto-detects your configured provider from environment variables (same priority
+order as `run_agent.py`). It handles venv activation, dependency checks, and provider validation
+automatically. The bundled demo job (`agent-prompts/demo-actionhistory-no-llm.yaml`) uses
+`auto_approve: true` so no human input is required at any stage.
+
 ### Human-driven workflow
 
 ```bash
@@ -420,6 +464,7 @@ See [Agent Interactive Mode](docs/Agent-Interactive-Mode.md) for the complete gu
 ai-migration-tool/
 ├── main.py                          # Core pipeline CLI (direct use)
 ├── run_agent.py                     # Agent entry point — reads YAML job files
+├── run_full.sh                      # One-command full pipeline runner (no manual steps)
 ├── setup_wizard.py                  # Setup wizard CLI entry point
 ├── requirements.txt
 │

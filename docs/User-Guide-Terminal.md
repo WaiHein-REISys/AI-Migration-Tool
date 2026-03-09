@@ -5,6 +5,27 @@
 
 ---
 
+## Zero-Input Automated Run
+
+If you want to run the full pipeline with a single command and no prompts, use `run_full.sh`:
+
+```bash
+# Template scaffold mode — no API key required
+./run_full.sh
+
+# Real LLM run (Anthropic)
+export ANTHROPIC_API_KEY=sk-ant-...
+./run_full.sh --llm
+
+# Custom job file, verbose output
+./run_full.sh --job agent-prompts/migrate-actionhistory-modern.yaml --verbose
+```
+
+The script handles venv activation, dependency checks, and API key validation.
+Skip to the [full command reference](#running-the-full-pipeline) if you need more control.
+
+---
+
 ## What Is Terminal Run Mode?
 
 Terminal Run is the **human-interactive workflow** where a developer executes commands directly

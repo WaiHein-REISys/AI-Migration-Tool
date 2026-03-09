@@ -1007,6 +1007,7 @@ def _run_new_job(args) -> int:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
+    """CLI entry point. Reads a YAML job file and drives the migration pipeline."""
     parser = argparse.ArgumentParser(
         description="AI Migration Tool — Agent mode (reads YAML job files)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
