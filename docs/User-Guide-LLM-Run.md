@@ -1,7 +1,7 @@
 # User Guide — LLM Run
 ## Configuring and Using LLM Providers with the AI Migration Tool
 
-**AI Migration Tool · 2026-03-05**
+**AI Migration Tool · 2026-03-09**
 
 ---
 
@@ -29,17 +29,24 @@ provider for your situation.
 The tool auto-detects available providers at startup in this priority order:
 
 ```
-1. ANTHROPIC_API_KEY   → Anthropic Claude API
-2. OPENAI_API_KEY      → OpenAI GPT / o-series API
-3. OLLAMA_MODEL        → Local Ollama server
-4. LLM_BASE_URL        → OpenAI-compatible endpoint (LM Studio, vLLM, Azure OpenAI, etc.)
-5. LLAMACPP_MODEL_PATH → Local GGUF model via llama.cpp
-6. LLM_SUBPROCESS_CMD  → CLI tool (any command that reads stdin, writes stdout)
-7. PATH detection      → Auto-detect claude, codex, or gemini binary on PATH
+1. ANTHROPIC_API_KEY      → Anthropic Claude API
+2. OPENAI_API_KEY         → OpenAI GPT / o-series API
+3. GOOGLE_API_KEY         → Google Gemini API (direct)
+4. GOOGLE_CLOUD_PROJECT   → Google Vertex AI (requires GOOGLE_APPLICATION_CREDENTIALS)
+5. OLLAMA_MODEL           → Local Ollama server
+6. LLM_BASE_URL           → OpenAI-compatible endpoint (LM Studio, vLLM, Azure OpenAI, etc.)
+7. LLAMACPP_MODEL_PATH    → Local GGUF model via llama.cpp
+8. LLM_SUBPROCESS_CMD     → CLI tool (any command that reads stdin, writes stdout)
+9. PATH detection         → Auto-detect claude, codex, or gemini binary on PATH
 ```
 
 The first matching provider is used. To override, set `llm.provider` in the job YAML or pass
 `--llm-subprocess-cmd <cmd>` on the command line.
+
+> **Pre-flight check:** if the pipeline needs an LLM (any mode except `scope` / `no_llm: true`)
+> but none is reachable, it exits immediately with **code 2** and a structured error — it never
+> silently falls back to Jinja2 scaffold. Remaining mid-run soft-fallbacks emit a
+> `[LLM_FAILURE_JSON]` line to stderr (see Troubleshooting).
 
 ---
 
@@ -129,7 +136,77 @@ python run_agent.py --job agent-prompts/<file>.yaml
 
 ---
 
-## Provider 3 — Ollama (Local, Free)
+## Provider 3 — Google Gemini API (Direct)
+
+### Setup
+
+```bash
+export GOOGLE_API_KEY="AIza..."
+```
+
+### Job YAML
+
+```yaml
+llm:
+  provider: google_gemini   # or just leave provider: null — auto-detected
+  model: gemini-2.5-pro     # null = default (gemini-2.5-pro)
+  timeout: 300
+```
+
+### Models Available
+
+| Model ID | Context Window | Speed | Best For |
+|----------|---------------|-------|----------|
+| `gemini-2.5-pro` | 1M tokens | Medium | Complex migrations with large context |
+| `gemini-2.0-flash` | 1M tokens | Fast | Standard migrations, cost-efficient |
+| `gemini-2.5-flash` | 1M tokens | Very fast | Simple scaffolds, batch runs |
+
+### Notes
+
+- **1M token context window** — handles very large codebases without chunking
+- Passes validation on first attempt in testing (strong prompt rule compliance)
+- Token usage is tracked and recorded in the conversion log automatically
+- May produce `flask_smorest` imports instead of plain `flask` — add an explicit import
+  rule to `prompts/conversion_system_<target>.txt` if this occurs
+
+---
+
+## Provider 4 — Google Vertex AI
+
+For **Google Cloud** environments where you authenticate via service account rather than API key.
+
+### Setup
+
+```bash
+export GOOGLE_CLOUD_PROJECT="my-gcp-project"
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
+```
+
+Or use Application Default Credentials (ADC):
+```bash
+gcloud auth application-default login
+export GOOGLE_CLOUD_PROJECT="my-gcp-project"
+```
+
+### Job YAML
+
+```yaml
+llm:
+  provider: vertex_ai
+  model: gemini-2.5-pro     # null = default
+  timeout: 300
+```
+
+### Notes
+
+- Uses the same Gemini models as Provider 3 but routes through Vertex AI's regional endpoints
+- Suitable for enterprise / regulated environments where data must stay within a GCP region
+- Requires `google-cloud-aiplatform` in the Python environment (`pip install google-cloud-aiplatform`)
+- Set `GOOGLE_CLOUD_LOCATION` to override the default region (`us-central1`)
+
+---
+
+## Provider 5 — Ollama (Local, Free)
 
 ### Setup
 
@@ -161,7 +238,7 @@ llm:
 
 ---
 
-## Provider 4 — OpenAI-Compatible Endpoint
+## Provider 6 — OpenAI-Compatible Endpoint
 
 For **LM Studio**, **vLLM**, **Ollama OpenAI-compat mode**, **Azure OpenAI**, and other
 OpenAI-protocol servers.
@@ -208,7 +285,7 @@ llm:
 
 ---
 
-## Provider 5 — llama.cpp (GGUF Local Model)
+## Provider 7 — llama.cpp (GGUF Local Model)
 
 For running quantized GGUF models directly without a server.
 
@@ -237,7 +314,7 @@ llm:
 
 ---
 
-## Provider 6 — Subprocess CLI (Claude Code CLI)
+## Provider 8 — Subprocess CLI (Claude Code CLI)
 
 Delegates LLM calls to the **claude** command-line tool. Best when you want Claude's quality
 without managing an API key directly in environment variables.
@@ -292,7 +369,7 @@ echo "<full prompt>" | claude --print --dangerously-skip-permissions --no-sessio
 
 ---
 
-## Provider 7 — Subprocess CLI (Codex CLI)
+## Provider 9 — Subprocess CLI (Codex CLI)
 
 Delegates LLM calls to **OpenAI Codex CLI** (`o4-mini` reasoning model).
 
@@ -347,7 +424,7 @@ Based on testing against this codebase:
 
 ---
 
-## Provider 8 — Subprocess CLI (Gemini CLI)
+## Provider 10 — Subprocess CLI (Gemini CLI)
 
 Delegates LLM calls to **Google Gemini CLI** (`gemini-2.5-pro`).
 
@@ -465,6 +542,24 @@ llm:
   timeout: 120
 ```
 
+### Google Gemini API (direct)
+
+```yaml
+llm:
+  provider: google_gemini
+  model: gemini-2.5-pro
+  timeout: 300
+```
+
+### Google Vertex AI
+
+```yaml
+llm:
+  provider: vertex_ai
+  model: gemini-2.5-pro
+  timeout: 300
+```
+
 ### No LLM (template scaffold only)
 
 ```yaml
@@ -506,17 +601,19 @@ def edit_activity(activity_id: str):
 
 ## Provider Comparison Table
 
-| Provider | API Key | Cost | Latency | Quality | Offline | Best For |
-|----------|---------|------|---------|---------|---------|----------|
-| **Anthropic API** | Required | ~$0.003–0.015/step | 3–10 s | ⭐⭐⭐⭐⭐ | No | Production migrations |
-| **OpenAI API (gpt-4o)** | Required | ~$0.005–0.020/step | 5–15 s | ⭐⭐⭐⭐ | No | Standard use |
-| **OpenAI API (o4-mini)** | Required | ~$0.003–0.012/step | 30–120 s | ⭐⭐⭐⭐⭐ | No | Complex reasoning tasks |
+| Provider | API Key / Auth | Cost | Latency | Quality | Offline | Best For |
+|----------|---------------|------|---------|---------|---------|----------|
+| **Anthropic API** | ANTHROPIC_API_KEY | ~$0.003–0.015/step | 3–10 s | ⭐⭐⭐⭐⭐ | No | Production migrations |
+| **OpenAI API (gpt-4o)** | OPENAI_API_KEY | ~$0.005–0.020/step | 5–15 s | ⭐⭐⭐⭐ | No | Standard use |
+| **OpenAI API (o4-mini)** | OPENAI_API_KEY | ~$0.003–0.012/step | 30–120 s | ⭐⭐⭐⭐⭐ | No | Complex reasoning tasks |
+| **Google Gemini API** | GOOGLE_API_KEY | Varies (~$0.002–0.010/step) | 10–30 s | ⭐⭐⭐⭐⭐ | No | Large context (1M tokens), Google Cloud |
+| **Google Vertex AI** | GCP service account / ADC | Varies | 10–30 s | ⭐⭐⭐⭐⭐ | No | Enterprise GCP, data residency |
 | **Ollama (local)** | None | Free | 20–120 s | ⭐⭐⭐ | Yes | Cost-sensitive / air-gapped |
 | **LM Studio / vLLM** | None | Free | 20–120 s | ⭐⭐⭐ | Yes | Enterprise local deployment |
 | **llama.cpp** | None | Free | 30–300 s | ⭐⭐⭐ | Yes | Minimal dependencies |
 | **Claude Code CLI** | CLI auth | Same as API | 3–15 s | ⭐⭐⭐⭐⭐ | No | Dev machines with claude installed |
 | **Codex CLI** | OPENAI_API_KEY | ~$0.003–0.012/step | 30–120 s | ⭐⭐⭐⭐ | No | OpenAI-first environments |
-| **Gemini CLI** | CLI auth | Varies | 42–91 s/step | ⭐⭐⭐⭐⭐ | No | Google Cloud environments |
+| **Gemini CLI** | CLI auth | Varies | 42–91 s/step | ⭐⭐⭐⭐⭐ | No | Google Cloud via CLI |
 | **No-LLM (scaffold)** | None | Free | <1 s | N/A | Yes | Demos, CI, stubs |
 
 ---
@@ -575,18 +672,37 @@ Costs are estimates based on claude-3-7-sonnet pricing at $3/$15 per MTok (in/ou
 
 ## Troubleshooting LLM Issues
 
-### "No LLM provider detected"
+### "No LLM provider configured" (exit code 2)
 
-```
-LLMConfigurationError: No provider detected. Set ANTHROPIC_API_KEY, OPENAI_API_KEY,
-OLLAMA_MODEL, LLM_BASE_URL, LLAMACPP_MODEL_PATH, or ensure claude/codex/gemini is on PATH.
+The pipeline exits immediately with **exit code 2** (before any files are touched) when no LLM
+is reachable and the mode requires one. The structured error looks like:
+
+```json
+{
+  "status": "error",
+  "error_type": "LLM_NOT_CONFIGURED",
+  "message": "No LLM provider is configured or reachable.",
+  "fix": [
+    "set ANTHROPIC_API_KEY=sk-ant-...         (Anthropic Claude)",
+    "set OPENAI_API_KEY=sk-...                (OpenAI GPT)",
+    "set GOOGLE_API_KEY=...                   (Google Gemini)",
+    "set GOOGLE_CLOUD_PROJECT=my-project      (Vertex AI + GOOGLE_APPLICATION_CREDENTIALS)",
+    "set OLLAMA_MODEL=llama3                  (local Ollama server)",
+    "add  llm.no_llm: true  in the job YAML  (template-only scaffold — no AI conversion)"
+  ]
+}
 ```
 
 **Fix:** Export at least one provider key. Check with:
 ```bash
 echo $ANTHROPIC_API_KEY    # should print your key (masked is fine)
+echo $GOOGLE_API_KEY       # Google Gemini
 which claude               # should print a path if Claude CLI is installed
 ```
+
+**Mid-run soft-fallback** (rare, if the API fails partway through): a `[LLM_FAILURE_JSON]`
+line is emitted to stderr and the conversion summary includes `"llm_used": false`. Check
+this field if you suspect scaffold output slipped through.
 
 ---
 
@@ -669,6 +785,12 @@ use a CLI with the wrong model name. Fix the validator's CLI configuration or se
 # ── API providers ──────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY=sk-ant-...          # Anthropic Claude
 OPENAI_API_KEY=sk-...                 # OpenAI / Codex
+GOOGLE_API_KEY=AIza...                # Google Gemini API (direct)
+
+# ── Google Cloud (Vertex AI) ───────────────────────────────────────────────
+GOOGLE_CLOUD_PROJECT=my-gcp-project         # enables Vertex AI provider
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json  # or use ADC: gcloud auth application-default login
+GOOGLE_CLOUD_LOCATION=us-central1           # optional; defaults to us-central1
 
 # ── Local providers ────────────────────────────────────────────────────────
 OLLAMA_MODEL=llama3.2                 # Ollama model name
@@ -684,4 +806,4 @@ PYTHONIOENCODING=utf-8                # Required on Windows for Unicode logs
 
 ---
 
-*AI Migration Tool · LLM Run User Guide · 2026-03-05*
+*AI Migration Tool · LLM Run User Guide · 2026-03-09*

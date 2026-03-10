@@ -43,7 +43,8 @@ pipeline:
 
   # OPTIONAL — absolute path to the target codebase root.
   # Used by Stage 7 (Integration) to place converted files into the target repo.
-  # Leave null if you only want to generate output without placing it.
+  # Auto-populated from config/wizard-registry.json when registered via the setup wizard.
+  # Set explicitly here to override, or leave null to rely on auto-population.
   target_root: null
 
 # ── Integration (Stage 7) ──────────────────────────────────────────────────
@@ -64,10 +65,13 @@ ui_consistency:
   fail_on_missing_classes: true  # true = FAIL if CSS classes are dropped
 
 # Stage 8: command-based end-to-end verification (build/test/lint)
+# Commands are auto-detected from the target codebase (package.json / pyproject.toml /
+# Makefile) and verification.enabled is flipped to true automatically when found.
+# Override by setting commands and enabled explicitly below.
 verification:
-  enabled: false
-  cwd: null                # null => target_root when set, else output_root
-  commands: []             # e.g. ["npm ci", "npm test", "pytest -q"]
+  enabled: false           # auto-set to true when commands are auto-detected
+  cwd: null                # null => target_root (auto-resolved); set explicitly to override
+  commands: []             # leave empty for auto-detection, or specify explicitly
   env: {}
   fail_on_error: true
 
@@ -87,6 +91,17 @@ llm:
   ollama_host: null
   max_tokens: null
   temperature: null
+
+# ── Orchestration ──────────────────────────────────────────────────────────
+# enabled: true  = LLM-driven orchestrator (dynamic workflow + auto-retry)
+# enabled: false = fixed sequential pipeline (default, backwards-compatible)
+orchestration:
+  enabled: false           # true = LLM orchestrator; false = sequential pipeline
+  learning: true           # always extract patterns + preferences after each run
+  max_plan_revisions: 2    # max auto-revisions the orchestrator can trigger
+  escalate_on_fail: true   # ask human if orchestrator cannot resolve ambiguity
+  backend: internal        # internal | google_adk
+  tool_use: auto           # auto | never  (auto = use native tool-use if provider supports it)
 
 notes: |
   Add any context the agent or human reviewer should know:

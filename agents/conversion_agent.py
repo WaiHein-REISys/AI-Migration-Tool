@@ -199,6 +199,12 @@ class ConversionAgent:
                 )
                 flagged.append({"step": step_id, "reason": msg})
 
+        # llm_used: True  = at least one step was converted by the LLM
+        #           False = every step used Jinja2 template scaffold (no LLM)
+        _llm_available = bool(
+            self._router is not None
+            and getattr(self._router, "is_available", False)
+        )
         summary = {
             "total":           len(steps),
             "completed":       len(completed),
@@ -206,6 +212,7 @@ class ConversionAgent:
             "skipped":         len(skipped),
             "completed_steps": completed,
             "flagged_steps":   flagged,
+            "llm_used":        _llm_available,
         }
         status = "completed" if not flagged else "completed_with_flags"
         self.log.finalize(status)

@@ -1,7 +1,7 @@
 # User Guide — Agent Chat Mode
 ## For Cursor Agent, Windsurf Cascade, GitHub Copilot, and Other AI Coding Agents
 
-**AI Migration Tool · 2026-03-05**
+**AI Migration Tool · 2026-03-09**
 
 ---
 
@@ -16,7 +16,8 @@ human typing.
 Key design principles:
 - Every command produces **machine-readable JSON** (`--json`) so the agent can parse success/failure
 - The human **approval gate** is satisfied by writing a `.approved` marker file instead of a TTY `yes`
-- If the LLM is unavailable the pipeline **soft-fails** to a Jinja2 scaffold; it never crashes the agent
+- If the LLM is unavailable the pipeline **exits immediately with code 2** before touching any files — it never silently falls back to scaffold output (use `llm.no_llm: true` if scaffold is intentional)
+- Any rare mid-run API failure emits a `[LLM_FAILURE_JSON]` line to stderr; the conversion summary includes `"llm_used": false` so agents can detect it programmatically
 - All outputs (`plans/`, `logs/`, `output/`, `checkpoints/`, `reports/`) are read-only from code — the agent may read them but must never edit them directly
 
 ---
@@ -89,10 +90,18 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # Option B — OpenAI API
 export OPENAI_API_KEY="sk-..."
 
-# Option C — Use Claude Code CLI (no API key needed if claude CLI is on PATH)
+# Option C — Google Gemini API (direct)
+export GOOGLE_API_KEY="AIza..."
+
+# Option D — Google Vertex AI (GCP service account)
+export GOOGLE_CLOUD_PROJECT="my-gcp-project"
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
+# Or use ADC: gcloud auth application-default login
+
+# Option E — Use Claude Code CLI (no API key needed if claude CLI is on PATH)
 # No env var required — detected automatically
 
-# Option D — Template-only mode (no API key, no LLM)
+# Option F — Template-only mode (no API key, no LLM)
 # Use --no-llm flag or set llm.no_llm: true in YAML
 ```
 
@@ -371,12 +380,27 @@ pipeline:
   dry_run: false
   auto_approve: false   # ALWAYS false in production
   force: false
+  # target_root: null   # Auto-populated from wizard registry if registered via --setup
 
 llm:
   provider: null        # Auto-detect from environment
   model: null           # Provider default
   no_llm: false
   timeout: 600          # Seconds per LLM call
+
+# verification block is auto-populated (enabled + commands) when target_root is reachable
+# and a package.json / pyproject.toml / Makefile is found. Override explicitly if needed:
+# verification:
+#   enabled: true
+#   commands: ["npm ci", "npm run build", "npm run test -- --watchAll=false --passWithNoTests"]
+
+# Orchestration: set enabled: true to use the LLM-driven dynamic orchestrator
+# (auto-retry, plan revision, learning memory) instead of the fixed sequential pipeline.
+orchestration:
+  enabled: false         # true = LLM orchestrator; false = sequential pipeline (default)
+  learning: true         # always write patterns to config/memory/ after each run
+  max_plan_revisions: 2
+  escalate_on_fail: true
 
 notes: |
   Agent context:
@@ -389,6 +413,10 @@ notes: |
 > **`auto_approve: true`** — Use **only for testing or demos**. In production agent workflows,
 > always have the agent call `--approve-plan` explicitly after reading the plan. This preserves
 > the human-in-the-loop checkpoint.
+
+> **`orchestration.enabled: true`** — Activates the LLM orchestrator that dynamically sequences
+> stages, auto-retries failures, and learns from each run (writes to `config/memory/*.json`).
+> Use this for fully autonomous runs where the agent should handle its own plan revisions.
 
 ---
 
@@ -419,13 +447,15 @@ python run_agent.py \
 
 | Error / Symptom | Cause | Fix |
 |----------------|-------|-----|
-| `LLMConfigurationError: No provider detected` | No API key set, no CLI on PATH | Set `ANTHROPIC_API_KEY` or add `--no-llm` |
+| Exit code 2 + `LLM_NOT_CONFIGURED` JSON | No API key set, no CLI on PATH | Set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or add `llm.no_llm: true` |
+| `[LLM_FAILURE_JSON]` on stderr mid-run | API failed after pipeline started | Check API key validity; see `"llm_used": false` in conversion summary |
 | `ApprovalGate: no .approved marker found` | `--approve-plan` not called | Call `--approve-plan` before `--mode full` |
 | `FeatureNotFoundError` | Feature folder doesn't exist in source root | Check `--list-features` output |
 | `CheckpointConflict` | Previous run exists for same feature/target | Add `--force` to re-run from scratch |
 | `ValidationFailed (confidence < 0.35)` | Validator simulation errored (CLI model mismatch) | Fix validator CLI config; see `logs/<run-id>-validation-report.json` |
 | `plan.status == "pending"` after `--status` | Plan not yet generated | Run without `--mode full` first |
 | JSON output contains `"status": "error"` | Pipeline stage failed | Read `error.message` and `error.traceback` fields |
+| Stages 7–8 skipped | `target_root` not set or wizard not run | Run `--setup` or set `target_root` explicitly; auto-populated from registry if registered |
 
 ---
 
@@ -441,4 +471,4 @@ python run_agent.py \
 
 ---
 
-*AI Migration Tool · Agent Chat User Guide · 2026-03-05*
+*AI Migration Tool · Agent Chat User Guide · 2026-03-09*

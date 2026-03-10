@@ -1296,6 +1296,14 @@ def main() -> int:
 
     ns = _job_to_args(job, overrides)
 
+    # Auto-populate target_root + verification commands from wizard registry /
+    # codebase inspection (non-fatal — never overwrites values already set).
+    try:
+        from agents.job_config_populator import auto_populate_job_config  # noqa: PLC0415
+        auto_populate_job_config(ns)
+    except Exception as _apc_err:  # pragma: no cover
+        logger.warning("auto_populate_job_config failed (non-fatal): %s", _apc_err)
+
     # Apply --mode override (lets agents change mode without editing the YAML)
     if args.mode:
         ns.mode = args.mode
@@ -1358,6 +1366,53 @@ def main() -> int:
             return 0
 
     llm_router = build_llm_router(ns)
+
+    # ── Pre-flight LLM check ──────────────────────────────────────────────────
+    # Fail fast with a clear, structured error when LLM is required but not
+    # configured.  Scaffold-only mode must be EXPLICITLY opted into via
+    #   llm.no_llm: true  in the job YAML  –or–  --no-llm on the CLI.
+    # It is NEVER a silent fallback — that hides conversion failures.
+    _no_llm   = getattr(ns, "no_llm",  False)
+    _mode     = (getattr(ns, "mode",   "plan") or "plan").lower()
+    _needs_llm = not _no_llm and _mode not in ("scope",)
+
+    if _needs_llm and (llm_router is None or not llm_router.is_available):
+        _fix_steps = [
+            "set ANTHROPIC_API_KEY=sk-ant-...         (Anthropic Claude)",
+            "set OPENAI_API_KEY=sk-...                (OpenAI GPT)",
+            "set GOOGLE_API_KEY=...                   (Google Gemini)",
+            "set GOOGLE_CLOUD_PROJECT=my-project      (Vertex AI + GOOGLE_APPLICATION_CREDENTIALS)",
+            "set OLLAMA_MODEL=llama3                  (local Ollama server)",
+            "add  llm.no_llm: true  in the job YAML  (template-only scaffold — no AI conversion)",
+        ]
+        if getattr(ns, "json_output", False):
+            import json as _json
+            print(_json.dumps({
+                "status":     "error",
+                "error_type": "LLM_NOT_CONFIGURED",
+                "message": (
+                    "No LLM provider is configured or reachable. "
+                    "The pipeline cannot perform AI-assisted conversion without one."
+                ),
+                "fix":  _fix_steps,
+                "docs": "See AGENT.md \u00a7 LLM configuration",
+            }, indent=2))
+        else:
+            print()
+            print("=" * 66)
+            print("  ERROR \u2014 No LLM provider configured")
+            print("=" * 66)
+            print()
+            print("  The pipeline cannot convert files without a configured LLM.")
+            print("  To fix, set ONE of the following environment variables:\n")
+            for _s in _fix_steps:
+                print(f"    \u2022 {_s}")
+            print()
+            print("  See AGENT.md \u00a7 LLM configuration for the full provider reference.")
+            print("=" * 66)
+            print()
+        return 2
+
     from main import _describe_router
     print_banner("AI Migration Tool v1.1 — Agent Mode")
     _print_job_summary(job, ns)

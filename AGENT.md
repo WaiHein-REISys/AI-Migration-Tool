@@ -331,3 +331,86 @@ When a user asks to "configure a new migration target" or "set up migration to X
      then: `python run_agent.py --setup --config wizard-config.json --non-interactive`
 2. Review generated prompts in `prompts/` (safe to edit for tuning)
 3. Use the generated `agent-prompts/_template_<target_id>.yaml` for migrations
+
+---
+
+## Troubleshooting
+
+### "No LLM provider configured" / exit code 2
+
+The pipeline will exit immediately with code `2` and a clear error when `mode: plan` or
+`mode: full` is requested but no LLM is reachable.
+
+**Fix:** set one of these environment variables before running:
+
+```bash
+# Windows CMD (set persists for this session only)
+set ANTHROPIC_API_KEY=sk-ant-...
+set OPENAI_API_KEY=sk-...
+set GOOGLE_API_KEY=...
+set OLLAMA_MODEL=llama3
+
+# PowerShell
+$env:ANTHROPIC_API_KEY="sk-ant-..."
+
+# bash / zsh
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+The pipeline never silently falls back to Jinja2 template scaffold — that must be explicitly
+opted into via `llm.no_llm: true` in the job YAML, so you always know whether real AI
+conversion happened.
+
+**How to detect fallback in automated pipelines:** any remaining soft-fallback (rare, mid-run
+API failure) emits a `[LLM_FAILURE_JSON]` line to stderr:
+```json
+{"event": "llm_fallback", "agent": "cursor", "context": "...", "error": "...", "action": "template_scaffold_used"}
+```
+The conversion summary also includes `"llm_used": false` when no LLM was invoked.
+
+---
+
+### Steps 7–8 skipped ("skipped_no_target" / "skipped_disabled")
+
+#### Auto-population (recommended)
+
+The pipeline **automatically fills in** `target_root` and `verification.commands` before
+each run — no manual YAML edits needed in most cases.
+
+**`target_root` auto-fill:** if `target_root` is `null` in the job file, the pipeline
+looks up the configured path for `pipeline.target` in `config/wizard-registry.json`
+(written by `python run_agent.py --setup`). If found, it is injected automatically.
+
+**`verification.commands` auto-detect:** if `verification.commands` is empty, the
+pipeline inspects the target codebase root and generates commands automatically:
+- `package.json` found → `npm ci` + `npm run build` + `npm run test` + `npm run lint`
+- Python project (`pyproject.toml` / `requirements.txt`) → `pip install` + `pytest`
+- `Makefile` → `make install`, `make build`, `make test`, `make lint` (whichever exist)
+
+When commands are detected, `verification.enabled` is also flipped to `true`
+automatically. Nothing is overwritten if you have already set values explicitly.
+
+#### Manual override
+
+If auto-population does not find your paths (e.g. the target was never registered via
+the setup wizard), set them explicitly in the job YAML:
+
+```yaml
+pipeline:
+  target_root: "C:/path/to/your/target-codebase"   # absolute path to the target repo
+
+verification:
+  enabled: true
+  cwd: "C:/path/to/your/target-codebase"   # directory to run commands in (defaults to target_root)
+  commands:
+    - "npm run build"          # build step
+    - "npm run test -- --ci"   # test step (non-interactive)
+    - "npm run lint"           # lint step
+  env: {}                      # optional extra env vars
+  fail_on_error: true          # true = pipeline fails if any command exits non-zero
+```
+
+After confirming values, run in `full` mode:
+```bash
+python run_agent.py --job agent-prompts/migrate-<name>.yaml --mode full
+```

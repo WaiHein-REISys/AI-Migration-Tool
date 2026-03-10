@@ -202,6 +202,23 @@ def require_llm_or_raise(
     agent = get_agent_name()
 
     if agent:
+        import json as _json
+        # Emit a machine-readable event to stderr so IDE agents (Cursor, Windsurf,
+        # Copilot) can detect that the LLM was NOT used and surface the error to
+        # the developer rather than silently accepting scaffold output.
+        _payload = _json.dumps({
+            "event":    "llm_fallback",
+            "agent":    agent,
+            "context":  context,
+            "error":    str(error),
+            "action":   "template_scaffold_used",
+            "severity": "warning",
+            "fix": (
+                "Configure an LLM provider — set ANTHROPIC_API_KEY, OPENAI_API_KEY, "
+                "GOOGLE_API_KEY, or OLLAMA_MODEL. See AGENT.md \u00a7 LLM configuration."
+            ),
+        })
+        print(f"[LLM_FAILURE_JSON] {_payload}", file=sys.stderr)
         logger.warning(
             "[LLM FAILURE — agent mode (%s)] %s failed: %s. "
             "Falling back to template scaffold. "
@@ -224,20 +241,17 @@ def require_llm_or_raise(
         f"\n"
         f"  How to fix:\n"
         f"    1. Check your API key / provider environment variables:\n"
-        f"         ANTHROPIC_API_KEY   — Anthropic Claude\n"
-        f"         OPENAI_API_KEY      — OpenAI GPT\n"
-        f"         OLLAMA_MODEL        — Local Ollama server\n"
-        f"         LLM_BASE_URL        — OpenAI-compatible (LM Studio, vLLM)\n"
-        f"         LLAMACPP_MODEL_PATH — Local GGUF file\n"
+        f"         ANTHROPIC_API_KEY            — Anthropic Claude\n"
+        f"         OPENAI_API_KEY               — OpenAI GPT\n"
+        f"         GOOGLE_API_KEY               — Google Gemini\n"
+        f"         GOOGLE_CLOUD_PROJECT         — Vertex AI (+ GOOGLE_APPLICATION_CREDENTIALS)\n"
+        f"         OLLAMA_MODEL                 — Local Ollama server\n"
+        f"         LLM_BASE_URL                 — OpenAI-compatible (LM Studio, vLLM)\n"
+        f"         LLAMACPP_MODEL_PATH          — Local GGUF file\n"
         f"    2. Or add to your job YAML:  llm.no_llm: true\n"
         f"       (template-only scaffold mode — no API key required)\n"
         f"    3. Or pass --no-llm on the command line\n"
         f"\n"
-        f"  Running inside an IDE agent (Cursor / Windsurf / Copilot)?\n"
-        f"  The pipeline will automatically use template scaffolds when\n"
-        f"  an agent is detected.  You can also force this explicitly:\n"
-        f"    set AI_AGENT_MODE=1   (Windows CMD)\n"
-        f"    $env:AI_AGENT_MODE=1  (PowerShell)\n"
-        f"    export AI_AGENT_MODE=1  (bash/zsh)\n"
+        f"  See AGENT.md \u00a7 LLM configuration for the full provider reference.\n"
         f"{'='*64}\n"
     ) from error

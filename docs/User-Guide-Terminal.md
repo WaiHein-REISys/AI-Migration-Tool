@@ -1,7 +1,7 @@
 # User Guide — Terminal Run
 ## For Developers Running the Migration Tool Interactively
 
-**AI Migration Tool · 2026-03-05**
+**AI Migration Tool · 2026-03-09**
 
 ---
 
@@ -63,7 +63,7 @@ set PYTHONIOENCODING=utf-8
 
 ### 3. Set your LLM provider
 
-At least one of the following must be configured (see the LLM Run guide for full details):
+At least one of the following must be configured (see the LLM Run guide for the full list):
 
 ```bash
 # Recommended: Anthropic Claude API
@@ -72,12 +72,22 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # Or: OpenAI API
 export OPENAI_API_KEY="sk-..."
 
+# Or: Google Gemini API (direct)
+export GOOGLE_API_KEY="AIza..."
+
+# Or: Google Vertex AI (GCP service account / ADC)
+export GOOGLE_CLOUD_PROJECT="my-gcp-project"
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
+
 # Or: Use Claude Code CLI (if the `claude` binary is on your PATH — no key needed)
 # Nothing to set; auto-detected
 
 # Or: No LLM (template-only scaffold)
 # Use --no-llm flag when running commands
 ```
+
+> **Pre-flight check:** if the mode requires an LLM and none is reachable, the pipeline exits
+> with **code 2** and a clear error — it never silently falls back to scaffold output.
 
 ### 4. Verify installation
 
@@ -389,6 +399,32 @@ Returns Jinja2 scaffolds instead of LLM-generated code. Useful for:
 
 ---
 
+### Orchestration mode — LLM-driven dynamic workflow
+
+By default the pipeline runs a fixed sequential stage order. Enable the LLM orchestrator for
+fully autonomous runs that handle retries, plan revisions, and escalations automatically:
+
+```yaml
+# In your job YAML:
+orchestration:
+  enabled: true            # LLM orchestrator drives the workflow
+  learning: true           # writes patterns to config/memory/ after each run
+  max_plan_revisions: 2    # max times the orchestrator can auto-revise the plan
+  escalate_on_fail: true   # asks the human if the orchestrator cannot resolve a failure
+  backend: internal        # internal | google_adk
+```
+
+```bash
+python run_agent.py --job agent-prompts/migrate-actionhistory-hrsa_simpler_pprs_repo.yaml \
+  --mode full
+```
+
+The orchestrator learns from every run — patterns and preferences are written to
+`config/memory/*.json` (committed to git, shared across the team). Over time this improves
+plan quality and reduces revision cycles.
+
+---
+
 ## Working with the Setup Wizard
 
 If you need to configure a new source/target pair, use the interactive wizard:
@@ -426,6 +462,12 @@ To see what targets are already configured:
 ```bash
 python run_agent.py --setup --list-targets
 ```
+
+> **Auto-population:** once a target is registered via the setup wizard, the pipeline
+> automatically fills in `target_root` and `verification.commands` for every job that uses
+> that target — you do not need to set them manually in the YAML. `target_root` is looked up
+> from `config/wizard-registry.json`; `verification.commands` are auto-detected from
+> `package.json` / `pyproject.toml` / `Makefile` in the target codebase.
 
 ---
 
@@ -522,14 +564,24 @@ checkpoints/
 
 ## Troubleshooting Common Issues
 
-### "No LLM provider detected"
+### "No LLM provider configured" (exit code 2)
+
+The pipeline exits with **code 2** before touching any files when no LLM is reachable:
 
 ```
-LLMConfigurationError: No provider detected.
-Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or ensure a supported CLI (claude/codex) is on PATH.
+[ERROR] No LLM provider is configured or reachable.
+Fix: set ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, GOOGLE_CLOUD_PROJECT,
+     OLLAMA_MODEL, or add  llm.no_llm: true  in the job YAML.
 ```
 
 **Fix:** Export at least one provider environment variable, or add `--no-llm` for template mode.
+
+```bash
+# Quick check
+echo $ANTHROPIC_API_KEY   # Anthropic
+echo $GOOGLE_API_KEY      # Google Gemini
+which claude              # Claude CLI (subprocess provider)
+```
 
 ---
 
@@ -598,7 +650,7 @@ python run_agent.py --job <file>.yaml --mode full --force
 python run_agent.py --list-jobs                    List all job files
 python run_agent.py --list-features --json         Discover source features
 python run_agent.py --new-job                      Create job file (interactive)
-python run_agent.py --job <file>                   Generate plan
+python run_agent.py --job <file>                   Generate plan (plan mode)
 python run_agent.py --status --job <file>          Check run status
 python run_agent.py --revise-plan --job <file> \   Revise plan with feedback
   --feedback "..."
@@ -609,11 +661,11 @@ python run_agent.py --job <file> --mode full \     Re-run from scratch
 python run_agent.py --job <file> --dry-run         Preview without writes
 python run_agent.py --job <file> --verbose         Debug output
 python run_agent.py --job <file> --select-llm      Pick LLM interactively
-python run_agent.py --job <file> --no-llm          Template-only mode
-python run_agent.py --setup                        Setup wizard
+python run_agent.py --job <file> --no-llm          Template-only (no API key)
+python run_agent.py --setup                        Setup wizard (registers target_root)
 python run_agent.py --setup --list-targets         List configured targets
 ```
 
 ---
 
-*AI Migration Tool · Terminal Run User Guide · 2026-03-05*
+*AI Migration Tool · Terminal Run User Guide · 2026-03-09*

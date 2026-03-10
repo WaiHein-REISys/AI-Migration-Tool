@@ -18,10 +18,8 @@ job:
 
 pipeline:
   # REQUIRED -- absolute path to the legacy feature folder.
-  # Replace <YOUR_SOURCE_ROOT> with your local source codebase path. Examples:
-  #   Windows:     "<FEATURE_ROOT_WINDOWS>"
-  #   macOS/Linux: "<FEATURE_ROOT_UNIX>"
-  feature_root: "<FEATURE_ROOT>"
+  # Reactivites Commands feature (CQRS command handlers for Activities).
+  feature_root: "/Users/leohein/Documents/Github/Reactivites/"
 
   # REQUIRED -- human-readable name (used in filenames and logs)
   feature_name: "Commands"
