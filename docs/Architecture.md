@@ -80,31 +80,41 @@ into modern target code, one feature folder at a time. All stages are orchestrat
 |---|---|---|
 | `config_ingestion_agent.py` | `ConfigIngestionAgent` | Loads and validates `skillset-config.json` and `rules-config.json`; merges CLI overrides |
 | `scoping_agent.py` | `ScopingAgent` | Walks the source feature folder; classifies files via AST + regex; produces a dependency graph |
-| `plan_agent.py` | `PlanAgent` | Sends dependency graph to LLM; parses the structured Plan Document; supports revision mode |
+| `plan_agent.py` | `PlanAgent` | Sends dependency graph to LLM; parses the structured Plan Document; supports revision mode and memory context injection |
 | `approval_gate.py` | `ApprovalGate` | Prompts human for `yes` or detects `output/<feature>/.approved` marker for agent approval |
 | `conversion_agent.py` | `ConversionAgent` | Iterates the approved plan; calls LLM per file; writes converted output; maintains checkpoint |
-| `conversion_log.py` | `ConversionLog` | Append-only JSON + Markdown audit log written during conversion |
+| `conversion_log.py` | `ConversionLog` | Append-only JSON + Markdown audit log written during conversion (uses `entries` + `action` fields) |
 | `validation_agent.py` | `ValidationAgent` | Verifies converted outputs exist and are non-empty; runs LLM old-vs-new behavior simulation |
 | `ui_consistency_agent.py` | `UIConsistencyAgent` | Static regex diff of Angular source vs converted React/TSX; checks CSS classes, HTML elements, event bindings, and structural directives; optional Storybook story generation |
 | `integration_agent.py` | `IntegrationAgent` | Places output files into `target_root`; syncs Python deps; verifies UI/backend structure via LLM; generates migration scripts |
 | `agent_context.py` | `AgentContext` | Shared immutable context passed through all pipeline stages |
+| `memory_store.py` | `MemoryStore` + `MemoryContext` | Zero-dependency persistent knowledge base in `config/memory/` — stores patterns, preferences, domain facts, failure resolutions; surfaced to `PlanAgent` and `ConversionAgent` via `MemoryContext` |
+| `knowledge_extractor.py` | `KnowledgeExtractor` | Mines `ConversionLog` artefacts post-run; populates `MemoryStore` with successful source→target patterns and failure resolutions |
+| `orchestrator_agent.py` | `OrchestratorAgent` | LLM-driven dynamic workflow controller; replaces the fixed sequential pipeline when `orchestration.enabled: true`; supports `native_tools` (Anthropic/OpenAI/Vertex AI) and `react_text` (Ollama/llama.cpp/subprocess) modes |
+| `orchestrator_backends/internal_backend.py` | `InternalOrchestrationBackend` | Built-in ReAct / native-tool loop (default, no extra dependencies) |
+| `orchestrator_backends/adk_backend.py` | `ADKOrchestrationBackend` | Google ADK backend; soft-depends on `google-adk`; auto-falls-back to `InternalOrchestrationBackend` if not installed |
 
 ### LLM Abstraction (`agents/llm/`)
 
 ```
 agents/llm/
 ├── base.py           # LLMMessage, LLMResponse, LLMConfig, BaseLLMProvider (ABC)
-├── registry.py       # LLMRouter — provider factory, auto-detect, soft/hard-fail logic
+│                     # + ToolDefinition, ToolCall (structured tool-use dataclasses)
+├── registry.py       # LLMRouter — provider factory, auto-detect, tool-use routing,
+│                     # soft/hard-fail logic, interactive provider picker
 └── providers/
-    ├── anthropic_provider.py      # Claude API
-    ├── openai_provider.py         # OpenAI + Azure OpenAI
+    ├── anthropic_provider.py      # Claude API — native tool-use (complete_with_tools)
+    ├── openai_provider.py         # OpenAI + Azure OpenAI — native tool-use
     ├── openai_compat_provider.py  # LM Studio, vLLM, Together AI
-    ├── ollama_provider.py         # Ollama native REST
-    └── llamacpp_provider.py       # Local GGUF via llama.cpp
+    ├── ollama_provider.py         # Ollama native REST (ReAct text mode)
+    ├── llamacpp_provider.py       # Local GGUF via llama.cpp (ReAct text mode)
+    ├── subprocess_provider.py     # Claude Code CLI, Codex CLI, any installed CLI tool
+    └── vertex_ai_provider.py      # Google Gemini API / Vertex AI — native tool-use
 ```
 
-`LLMRouter` exposes a single `.complete(messages, config)` method. Provider selection
-follows the auto-detect chain or the explicit `llm.provider` value from the job file.
+`LLMRouter` exposes `.complete()` for standard completions and `.complete_with_tools()`
+for structured tool-use (Anthropic, OpenAI, Vertex AI). Provider selection follows the
+auto-detect chain or the explicit `llm.provider` value from the job file.
 
 ### Setup Wizard (`wizard/`)
 
@@ -128,7 +138,11 @@ LRU cache. Template tokens (`{placeholder}`) are filled at call time by each age
 |---|---|---|
 | `skillset-config.json` | `schemas/skillset-schema.json` | Stack definitions (source + target stacks, component mappings, project structure) |
 | `rules-config.json` | `schemas/rules-schema.json` | Guardrail rules (RULE-001 to RULE-010) |
-| `wizard-registry.json` | *(inline)* | Idempotency registry for wizard-generated targets |
+| `wizard-registry.json` | *(inline)* | Idempotency registry for wizard-generated targets (machine-specific, not committed) |
+| `memory/pattern-library.json` | *(inline)* | Successful source→target file conversion patterns (committed — shared across team) |
+| `memory/user-preferences.json` | *(inline)* | Per-target reviewer preferences accumulated over runs |
+| `memory/domain-knowledge.json` | *(inline)* | Known library/service mappings and migration notes |
+| `memory/failure-registry.json` | *(inline)* | Ambiguity resolution history for recurring patterns |
 
 ---
 
@@ -230,3 +244,56 @@ This env var switches all LLM failure handling from **hard-fail** to **soft-fail
 
 This allows agents (Cursor, Windsurf, etc.) to receive partial output even when the
 LLM is unavailable, rather than crashing the session.
+
+---
+
+## Orchestration Mode (Optional)
+
+When `orchestration.enabled: true` in the job YAML, `main.py` routes the run through
+`OrchestratorAgent` instead of the fixed sequential pipeline.
+
+```
+main.py
+  └─ OrchestratorAgent
+       ├─ _build_approved_plan()          # scoping + planning + approval (same as sequential)
+       └─ _run_backend()
+            ├─ InternalOrchestrationBackend  # default — built-in ReAct / native-tool loop
+            │     ├─ native_tools mode       # Anthropic/OpenAI/Vertex AI: structured ToolCall
+            │     └─ react_text mode         # Ollama/llama.cpp/subprocess: THOUGHT/ACTION/PARAMS
+            └─ ADKOrchestrationBackend       # optional — Google ADK (auto-fallback to internal)
+```
+
+**Tool-use modes:**
+- `native_tools` — used when `LLMRouter.supports_tool_use()` returns `True` (Anthropic, OpenAI, Vertex AI). The orchestrator sends `ToolDefinition` objects and receives structured `ToolCall` responses.
+- `react_text` — used for Ollama, llama.cpp, subprocess. The orchestrator prompts the LLM to emit `THOUGHT:` / `ACTION:` / `PARAMS:` text blocks which are parsed by regex.
+
+**Sequential pipeline** (`orchestration.enabled: false`, the default) runs unchanged —
+full backwards compatibility.
+
+---
+
+## Learning Memory System
+
+The `MemoryStore` + `KnowledgeExtractor` pair runs on **both** orchestrated and
+sequential pipeline paths when `orchestration.learning: true` (the default).
+
+```
+Before run:    MemoryStore.get_context(feature, dependency_graph, target)
+                  → MemoryContext { similar_patterns, user_preferences,
+                                    domain_facts, failure_resolutions,
+                                    context_summary }
+               context_summary is injected into PlanAgent + ConversionAgent prompts
+
+After run:     KnowledgeExtractor.extract(run_id, dependency_graph, conversion_log_path)
+                  → mines ConversionLog for wrote_file entries
+                  → derives source_signature + target_signature from file paths
+                  → calls MemoryStore.record_patterns() / record_failure_resolution()
+                  → writes atomic updates to config/memory/*.json
+```
+
+**Pattern matching** uses Jaccard similarity (threshold 0.35) on import + hook token sets.
+Patterns with overlapping import/hook vocabularies bubble up in `similar_patterns` for
+the next run of a similar feature.
+
+**Memory files** (`config/memory/*.json`) are committed to version control so the entire
+team shares accumulated migration patterns and preferences across machines.

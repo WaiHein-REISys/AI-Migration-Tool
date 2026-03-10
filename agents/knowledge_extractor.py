@@ -113,16 +113,22 @@ class KnowledgeExtractor:
         Mine 'wrote_file' / 'completed' log entries to find source→target
         conversion patterns (import set + hook set → target signature).
 
+        Supports both ConversionLog format (key="entries", action field) and
+        synthetic log format (key="steps", status field) for backwards compat.
+
         Writes to MemoryStore.pattern-library.json via record_patterns().
         """
-        steps = conversion_log.get("steps", [])
+        # ConversionLog uses "entries" with an "action" field.
+        # Synthetic logs (from older runs) use "steps" with a "status" field.
+        steps = conversion_log.get("steps") or conversion_log.get("entries", [])
         if not steps:
             return 0
 
         # Build enriched steps with source_signature / target_signature if missing
         enriched = []
         for step in steps:
-            status = step.get("status", "")
+            # Normalise: ConversionLog uses "action"; synthetic uses "status"
+            status = step.get("status") or step.get("action", "")
             if status not in ("wrote_file", "completed", "success"):
                 continue
 
@@ -136,7 +142,7 @@ class KnowledgeExtractor:
                 tgt_sig = self._derive_target_signature(step)
 
             if src_sig and tgt_sig:
-                enriched.append({**step, "source_signature": src_sig, "target_signature": tgt_sig})
+                enriched.append({**step, "status": status, "source_signature": src_sig, "target_signature": tgt_sig})
 
         if not enriched:
             return 0
@@ -151,6 +157,7 @@ class KnowledgeExtractor:
         file_type = step.get("file_type", "")
         component = step.get("component_type", "")
         hooks      = step.get("source_hooks", [])
+        source_file = step.get("source_file", "")
 
         if file_type:
             parts.append(file_type)
@@ -158,6 +165,9 @@ class KnowledgeExtractor:
             parts.append(component)
         if hooks:
             parts.append(f"[{', '.join(hooks[:3])}]")
+        # Fall back to file name stem when richer metadata is absent
+        if not parts and source_file:
+            parts.append(Path(source_file).stem)
 
         return " ".join(parts) if parts else ""
 
@@ -165,8 +175,8 @@ class KnowledgeExtractor:
     def _derive_target_signature(step: dict) -> str:
         """Build a human-readable target signature from step metadata."""
         parts = []
-        output_file = step.get("output_file", "")
-        target_type = step.get("target_type", "")
+        output_file  = step.get("output_file", "") or step.get("target_file", "")
+        target_type  = step.get("target_type", "")
         target_hooks = step.get("target_hooks", [])
 
         if target_type:
@@ -175,6 +185,9 @@ class KnowledgeExtractor:
             parts.append(Path(output_file).suffix or "")
         if target_hooks:
             parts.append(f"[{', '.join(target_hooks[:3])}]")
+        # Fall back to file name stem when richer metadata is absent
+        if not parts and output_file:
+            parts.append(Path(output_file).stem)
 
         return " ".join(filter(None, parts)) if parts else ""
 
@@ -223,7 +236,8 @@ class KnowledgeExtractor:
 
         For each resolved ambiguity, record it in MemoryStore.failure-registry.json.
         """
-        steps = conversion_log.get("steps", [])
+        # Support both "steps" (synthetic) and "entries" (ConversionLog) format
+        steps = conversion_log.get("steps") or conversion_log.get("entries", [])
         if not steps:
             return 0
 
@@ -232,7 +246,8 @@ class KnowledgeExtractor:
         resolved_files: set[str] = set()
 
         for step in steps:
-            status = step.get("status", "")
+            # Normalise: ConversionLog uses "action"; synthetic uses "status"
+            status = step.get("status") or step.get("action", "")
             src    = step.get("source_file", "")
             if not src:
                 continue

@@ -449,15 +449,20 @@ class ConversionAgent:
                 pass
 
         user_message = (
-            f"Convert the following source file to the target stack.\n"
+            f"TEXT GENERATION TASK — output the translated file text only.\n"
+            f"Do NOT use tools. Do NOT write files. Do NOT read files from disk.\n"
+            f"Your response text IS the output — it will be captured and saved by the caller.\n\n"
             f"Conversion Step: {step['id']}\n"
             f"Source file: `{step['source_file']}`\n"
             f"Target file: `{step['target_file']}`\n"
             f"Rationale: {step.get('rationale', '')}\n"
             f"{template_hint}"
             f"{memory_hint}\n"
-            f"SOURCE CODE:\n```\n{source_code}\n```\n\n"
-            f"Output ONLY the converted code. No markdown fences."
+            f"SOURCE CODE TO TRANSLATE:\n```\n{source_code}\n```\n\n"
+            f"Reply with the complete translated file text and NOTHING ELSE.\n"
+            f"First character of your reply must be the first character of the output file.\n"
+            f"No preamble. No explanation. No markdown fences. No 'here is the file:'.\n"
+            f"Do NOT describe changes. Output the code directly."
         )
 
         try:

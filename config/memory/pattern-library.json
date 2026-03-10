@@ -1,1 +1,15 @@
-{"version": "1.0", "patterns": []}
+{
+  "version": "1.0",
+  "patterns": [
+    {
+      "fingerprint": "6b9a12302631",
+      "source_signature": "ActionHistory.component",
+      "target_signature": ".tsx",
+      "source_imports": [],
+      "source_hooks": [],
+      "feature_name": "unknown",
+      "confidence": 0.85,
+      "run_count": 1
+    }
+  ]
+}

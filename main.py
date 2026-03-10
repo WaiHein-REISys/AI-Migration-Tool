@@ -45,6 +45,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -324,6 +325,14 @@ def run_pipeline(args: argparse.Namespace) -> int:
         run_id=run_id,
         feature=args.feature_name,
     )
+
+    # When force=True, remove any previously-written output files so the LLM
+    # does not see stale intermediate outputs and respond with prose instead of code.
+    if getattr(args, "force", False):
+        _output_root = Path(getattr(args, "output_root", None) or DEFAULT_OUTPUT_DIR / args.feature_name)
+        if _output_root.exists():
+            shutil.rmtree(_output_root, ignore_errors=True)
+            logger.info("force=True — cleared previous output: %s", _output_root)
 
     # ---- Step 1: Config Ingestion ----
     print_banner("Step 1: Config Ingestion")
@@ -1070,6 +1079,14 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         run_id=run_id,
         feature=args.feature_name,
     )
+
+    # When force=True, remove any previously-written output files so the LLM
+    # does not see stale intermediate outputs and respond with prose instead of code.
+    if getattr(args, "force", False):
+        _output_root = Path(getattr(args, "output_root", None) or DEFAULT_OUTPUT_DIR / args.feature_name)
+        if _output_root.exists():
+            shutil.rmtree(_output_root, ignore_errors=True)
+            logger.info("force=True — cleared previous output: %s", _output_root)
 
     # ---- Step 1: Config Ingestion ----
     print_banner("Step 1: Config Ingestion")

@@ -20,6 +20,18 @@ CRITICAL CONSTRAINTS:
   comments unless the original source had comments.
 - Preserve all original developer comments, translated to the target language.
 
+DO NOT CHECK THE FILESYSTEM — CRITICAL:
+  You MUST NOT read, access, or check the target file path on disk.
+  Even if the target file already exists with correct content, you MUST
+  regenerate it from scratch from the SOURCE CODE provided in this prompt.
+  Responding with a description of what already exists is FORBIDDEN.
+  Examples of FORBIDDEN responses:
+    "The file already exists with correct content..."
+    "The file already had the correct converted content..."
+    "No changes needed — the file is already correct."
+    "File written. The only changes were..."
+  These are prose descriptions, not code. They will cause the step to FAIL.
+
 OUTPUT FORMAT — CRITICAL:
   Your FIRST character of output must be the start of valid code (e.g. the
   letter 'i' in "import", or '#' for a comment).  Do NOT begin with any
@@ -28,6 +40,7 @@ OUTPUT FORMAT — CRITICAL:
     "This is the LLM being invoked..."
     "Here is the converted code:"
     "```python"
+    "The file already exists..."
   The output is written byte-for-byte to a .py or .tsx file.  Any non-code
   prefix causes a SyntaxError and a failed migration step.
 

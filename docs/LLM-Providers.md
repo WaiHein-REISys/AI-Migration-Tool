@@ -1,24 +1,36 @@
 # LLM Providers
 
-The AI Migration Tool supports five LLM backends. The provider is selected automatically
+The AI Migration Tool supports seven LLM backends. The provider is selected automatically
 from environment variables or explicitly in the job file / CLI flags.
 
 ---
 
 ## Auto-Detection Order
 
-When `llm.provider` is `null` (the default), the tool detects the provider in this order:
+When `llm.provider` is `null` (the default), the Python runtime detects the provider
+in this priority order:
 
 ```
-ANTHROPIC_API_KEY  →  anthropic
-OPENAI_API_KEY     →  openai
-OLLAMA_MODEL       →  ollama
-LLM_BASE_URL       →  openai_compat
-LLAMACPP_MODEL_PATH → llamacpp
+LLM_PROVIDER (explicit override)
+  → LLAMACPP_MODEL_PATH   →  llamacpp
+  → OLLAMA_MODEL          →  ollama
+  → LLM_BASE_URL          →  openai_compat   (only when OPENAI_API_KEY is unset)
+  → OPENAI_API_KEY        →  openai
+  → ANTHROPIC_API_KEY     →  anthropic
+  → GOOGLE_API_KEY        →  vertex_ai       (Gemini direct API)
+  → GOOGLE_CLOUD_PROJECT  →  vertex_ai       (Vertex AI / ADC)
+  → LLM_SUBPROCESS_CMD    →  subprocess      (explicit CLI)
+  → claude on PATH        →  subprocess:claude
+  → codex  on PATH        →  subprocess:codex
 ```
 
 First found wins. If none are set and `no_llm` is false, a `LLMConfigurationError`
 is raised (or a soft-fail scaffold is returned in agent mode).
+
+> **Note:** `run_full.sh` uses its own bash-side detection order that prefers cloud
+> providers first (Anthropic → OpenAI → Google → Ollama → …) for demo convenience.
+> The Python code preferring local providers first is intentional — it avoids accidental
+> API calls when a local server is already running.
 
 ---
 
@@ -230,6 +242,118 @@ llm:
 
 ---
 
+### `vertex_ai` — Google Gemini API / Vertex AI
+
+Supports both the Gemini direct API (via `GOOGLE_API_KEY`) and Google Vertex AI
+(via service account or Application Default Credentials).
+
+**Supports structured tool-use** — used automatically by `OrchestratorAgent` in
+`native_tools` mode (same as Anthropic and OpenAI).
+
+**Environment variables:**
+- `GOOGLE_API_KEY` — Gemini direct API (no GCP project needed)
+- `GOOGLE_CLOUD_PROJECT` — Vertex AI via ADC / service account
+
+**Packages** (install whichever path you use):
+```bash
+pip install google-generativeai   # Gemini direct API
+pip install vertexai              # Vertex AI SDK
+```
+Both are optional soft-dependencies — the tool falls back gracefully when neither
+is installed.
+
+**Default model:** `gemini-2.0-flash`
+
+```bash
+# Gemini API
+export GOOGLE_API_KEY=AIza...
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml
+
+# Vertex AI
+export GOOGLE_CLOUD_PROJECT=my-gcp-project
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml
+```
+
+```yaml
+# Job file (Gemini API)
+llm:
+  provider: vertex_ai
+  model: gemini-2.0-flash
+```
+
+```yaml
+# Job file (Vertex AI — specific model)
+llm:
+  provider: vertex_ai
+  model: gemini-1.5-pro
+```
+
+**Recommended models:**
+- `gemini-2.0-flash` — fast, strong code understanding (default)
+- `gemini-1.5-pro` — higher quality, larger context
+- `gemini-1.5-flash` — fastest, lower cost
+
+---
+
+### `subprocess` — CLI Tool Delegation (Claude Code CLI / Codex CLI)
+
+The `subprocess` provider shells out to an installed CLI tool rather than calling
+an API directly. No API key is required — authentication is handled by the CLI tool
+itself. Supports any CLI that reads a prompt from stdin and writes a response to stdout.
+
+**Uses ReAct text mode** for orchestration (THOUGHT / ACTION / PARAMS parsing).
+
+**Environment variable:** `LLM_SUBPROCESS_CMD` (optional — auto-detected if `claude`
+or `codex` is on PATH)
+
+**Package:** none (CLI must already be installed)
+
+```bash
+# Claude Code CLI (auto-detected when on PATH, or set explicitly)
+export LLM_SUBPROCESS_CMD=claude
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml
+
+# Or pass at CLI
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --llm-subprocess-cmd claude
+
+# OpenAI Codex CLI
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --llm-subprocess-cmd codex
+```
+
+```yaml
+# Job file
+llm:
+  provider: subprocess
+  subprocess_cmd: claude   # or: codex
+```
+
+**Extra arguments and env vars:**
+```bash
+# Forward extra args to the CLI
+export LLM_SUBPROCESS_ARGS="--verbose"
+
+# Pass env vars to the subprocess
+export LLM_SUBPROCESS_CMD=claude
+```
+
+**Cursor / Windsurf agents (non-interactive):**
+```bash
+# Full agent workflow without any TTY interaction
+python run_agent.py --list-features --json
+python run_agent.py --new-job --feature ActionHistory --target snake_case \
+  --non-interactive --json
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --llm-subprocess-cmd claude
+python run_agent.py --approve-plan \
+  --job agent-prompts/migrate-actionhistory-snake_case.yaml
+python run_agent.py --job agent-prompts/migrate-actionhistory-snake_case.yaml \
+  --mode full --llm-subprocess-cmd claude
+```
+
+---
+
 ## No-LLM Mode (Template Scaffold)
 
 When `llm.no_llm: true` (or `--no-llm` at CLI), all LLM calls are replaced with
@@ -258,13 +382,15 @@ python main.py --feature-root "..." --feature-name "F" --mode full \
 | Flag | Default | Description |
 |---|---|---|
 | `--no-llm` | off | Disable LLM; use Jinja2 scaffold only |
-| `--llm-provider` | auto-detect | `anthropic` \| `openai` \| `openai_compat` \| `ollama` \| `llamacpp` |
+| `--llm-provider` | auto-detect | `anthropic` \| `openai` \| `openai_compat` \| `ollama` \| `llamacpp` \| `vertex_ai` \| `subprocess` |
 | `--llm-model` | provider default | Model name or ID |
 | `--llm-base-url` | — | Base URL for OpenAI-compatible or Azure endpoints |
 | `--llm-model-path` | — | Path to local GGUF file (llamacpp only) |
 | `--ollama-host` | `http://localhost:11434` | Ollama server URL |
 | `--llm-max-tokens` | `8192` | Max tokens per LLM call |
 | `--llm-temperature` | `0.2` | Sampling temperature |
+| `--llm-subprocess-cmd` | — | CLI tool name for subprocess provider (`claude`, `codex`, etc.) |
+| `--select-llm` | off | Show interactive provider picker (human TTY only; not for agents) |
 
 ---
 

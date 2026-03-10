@@ -103,6 +103,12 @@ set LLM_MODEL=local-model
 # Local GGUF via llama.cpp
 set LLAMACPP_MODEL_PATH=C:\models\mistral-7b.Q4_K_M.gguf
 
+# Google Gemini API
+set GOOGLE_API_KEY=AIza...
+
+# Google Vertex AI (GCP service account / Application Default Credentials)
+set GOOGLE_CLOUD_PROJECT=my-gcp-project
+
 # Claude Code CLI or OpenAI Codex CLI — no env var needed
 # Auto-detected if `claude` or `codex` is on your PATH
 # Or set explicitly:
@@ -110,10 +116,11 @@ set LLM_SUBPROCESS_CMD=claude             # Windows CMD
 export LLM_SUBPROCESS_CMD=claude          # macOS/Linux
 ```
 
-**Auto-detect priority order:**
+**Auto-detect priority order (`run_agent.py` / Python):**
 ```
 LLM_PROVIDER (explicit) → LLAMACPP_MODEL_PATH → OLLAMA_MODEL → LLM_BASE_URL
-→ OPENAI_API_KEY → ANTHROPIC_API_KEY → LLM_SUBPROCESS_CMD → claude on PATH → codex on PATH
+→ OPENAI_API_KEY → ANTHROPIC_API_KEY → GOOGLE_API_KEY (Gemini) → GOOGLE_CLOUD_PROJECT (Vertex AI)
+→ LLM_SUBPROCESS_CMD → claude on PATH → codex on PATH
 ```
 
 **Interactive provider picker** — if you're running manually in a terminal and multiple
@@ -168,8 +175,17 @@ export LLAMACPP_MODEL_PATH=/path/to/model.gguf  # llama.cpp local GGUF
 export LLM_SUBPROCESS_CMD=claude              # Claude Code CLI or Codex CLI
 ./run_full.sh --llm
 
+export GOOGLE_API_KEY=AIza...               # Google Gemini API
+./run_full.sh --llm
+
+export GOOGLE_CLOUD_PROJECT=my-gcp-project  # Google Vertex AI
+./run_full.sh --llm
+
 # Explicit provider (overrides auto-detection)
 ./run_full.sh --llm --provider openai
+
+# LLM-driven orchestration mode (OrchestratorAgent — requires live LLM)
+./run_full.sh --llm --orchestrate
 
 # Custom job file
 ./run_full.sh --job agent-prompts/migrate-actionhistory-modern.yaml
@@ -281,17 +297,19 @@ See [Pipeline Stages](docs/Pipeline-Stages.md) for full details.
 
 | Provider | Env var / flag | Package | Notes |
 |---|---|---|---|
-| `anthropic` | `ANTHROPIC_API_KEY` | included | Claude API |
-| `openai` | `OPENAI_API_KEY` | `pip install openai` | GPT models |
+| `anthropic` | `ANTHROPIC_API_KEY` | included | Claude API — supports tool-use |
+| `openai` | `OPENAI_API_KEY` | `pip install openai` | GPT models — supports tool-use |
 | `openai_compat` | `LLM_BASE_URL` | `pip install openai` | LM Studio, vLLM, Azure |
 | `ollama` | `OLLAMA_MODEL` | `pip install ollama` (optional) | Local Ollama server |
 | `llamacpp` | `LLAMACPP_MODEL_PATH` | `pip install llama-cpp-python` | Local GGUF file |
+| `vertex_ai` | `GOOGLE_API_KEY` or `GOOGLE_CLOUD_PROJECT` | `pip install google-generativeai` or `pip install vertexai` (optional) | Gemini API / Vertex AI — supports tool-use |
 | `subprocess` | `LLM_SUBPROCESS_CMD` or `--llm-subprocess-cmd` | none (CLI must be installed) | Claude Code CLI, Codex CLI, any CLI |
 
-Auto-detect priority order:
+Auto-detect priority order (`run_agent.py` / Python):
 ```
 LLM_PROVIDER (explicit) → LLAMACPP_MODEL_PATH → OLLAMA_MODEL → LLM_BASE_URL
-→ OPENAI_API_KEY → ANTHROPIC_API_KEY → LLM_SUBPROCESS_CMD → claude on PATH → codex on PATH
+→ OPENAI_API_KEY → ANTHROPIC_API_KEY → GOOGLE_API_KEY (Gemini) → GOOGLE_CLOUD_PROJECT (Vertex AI)
+→ LLM_SUBPROCESS_CMD → claude on PATH → codex on PATH
 ```
 
 Use `llm.no_llm: true` (or `--no-llm`) for template-only scaffold mode — no API key needed.
@@ -385,6 +403,14 @@ llm:
   no_llm:   false   # true = template scaffold, no API key required
   provider: null    # null = auto-detect from env vars
   model:    null    # null = provider default
+
+orchestration:
+  enabled: false         # true = LLM-driven OrchestratorAgent; false = sequential pipeline (default)
+  learning: true         # extract patterns + preferences after each run (config/memory/)
+  max_plan_revisions: 2  # max auto-revisions the orchestrator can trigger
+  escalate_on_fail: true # ask human if orchestrator cannot resolve ambiguity
+  backend: internal      # internal | google_adk
+  tool_use: auto         # auto | always | never
 ```
 
 Available templates:
@@ -511,23 +537,31 @@ ai-migration-tool/
 ├── agents/
 │   ├── config_ingestion_agent.py
 │   ├── scoping_agent.py
-│   ├── plan_agent.py                # Supports revision mode (--revise-plan)
+│   ├── plan_agent.py                # Supports revision mode + memory context injection
 │   ├── conversion_agent.py
 │   ├── conversion_log.py
 │   ├── approval_gate.py             # Detects .approved marker for agent approval
 │   ├── validation_agent.py          # Stage 6 — file checks + LLM behavior simulation
 │   ├── ui_consistency_agent.py      # Stage 6b — CSS/element/event diff, optional Storybook stubs
 │   ├── integration_agent.py         # Stage 7 — placement, dep sync, structural verification
+│   ├── memory_store.py              # MemoryStore + MemoryContext — persistent cross-run learning
+│   ├── knowledge_extractor.py       # Mines ConversionLog artefacts → populates MemoryStore
+│   ├── orchestrator_agent.py        # OrchestratorAgent — LLM-driven dynamic workflow controller
+│   ├── orchestrator_backends/
+│   │   ├── internal_backend.py      # Built-in ReAct / native-tool loop (default)
+│   │   └── adk_backend.py           # Google ADK backend (optional, auto-fallback)
 │   └── llm/
 │       ├── base.py                  # LLMMessage, LLMResponse, LLMConfig, BaseLLMProvider
-│       ├── registry.py              # LLMRouter — provider factory, auto-detect, interactive picker
+│       │                            # + ToolDefinition, ToolCall (for tool-use providers)
+│       ├── registry.py              # LLMRouter — provider factory, auto-detect, tool-use routing
 │       └── providers/
-│           ├── anthropic_provider.py
-│           ├── openai_provider.py
-│           ├── openai_compat_provider.py
-│           ├── ollama_provider.py
-│           ├── llamacpp_provider.py
-│           └── subprocess_provider.py   # Claude Code CLI, Codex CLI, any CLI tool
+│           ├── anthropic_provider.py      # Claude API — native tool-use
+│           ├── openai_provider.py         # OpenAI + Azure — native tool-use
+│           ├── openai_compat_provider.py  # LM Studio, vLLM, Groq, etc.
+│           ├── ollama_provider.py         # Local Ollama (ReAct text mode)
+│           ├── llamacpp_provider.py       # Local GGUF (ReAct text mode)
+│           ├── subprocess_provider.py     # Claude Code CLI, Codex CLI, any CLI tool
+│           └── vertex_ai_provider.py      # Google Gemini API / Vertex AI — native tool-use
 │
 ├── prompts/                         # LLM prompt text files (edit freely)
 │   ├── plan_system.txt              # Default PlanAgent prompt (fallback)
@@ -545,7 +579,12 @@ ai-migration-tool/
 ├── config/
 │   ├── skillset-config.json         # Stack definitions + component mappings
 │   ├── rules-config.json            # Guardrail rules (RULE-001 – RULE-010)
-│   ├── wizard-registry.json         # Registered wizard targets
+│   ├── wizard-registry.json         # Registered wizard targets (machine-specific, not committed)
+│   ├── memory/                      # ⬅ team-shared learning memory — commit these
+│   │   ├── pattern-library.json     # Successful source→target conversion patterns
+│   │   ├── user-preferences.json    # Per-target reviewer preferences
+│   │   ├── domain-knowledge.json    # Known library/service mappings
+│   │   └── failure-registry.json    # Ambiguity resolution history
 │   └── schemas/                     # JSON Schemas for config validation
 │
 ├── templates/                       # Jinja2 conversion scaffolds (no-LLM mode)
@@ -602,4 +641,4 @@ See [Guardrail Rules](docs/Guardrail-Rules.md) for rationale and enforcement det
 
 ---
 
-*AI Migration Tool v1.6 | 9-stage pipeline with UI Consistency Audit, Integration & Placement, interactive agent mode, plan revision, and Setup Wizard*
+*AI Migration Tool v1.7 | 9-stage pipeline with Multi-Agent Orchestration, Learning Memory, Vertex AI / Gemini support, UI Consistency Audit, Integration & Placement, interactive agent mode, plan revision, and Setup Wizard*

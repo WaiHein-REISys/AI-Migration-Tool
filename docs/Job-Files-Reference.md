@@ -158,7 +158,7 @@ llm:
   no_llm: false
 
   # LLM provider. null = auto-detect from environment variables.
-  # Choices: anthropic | openai | openai_compat | ollama | llamacpp
+  # Choices: anthropic | openai | openai_compat | ollama | llamacpp | vertex_ai | subprocess
   provider: null
 
   # Model name/ID. null = provider default.
@@ -188,6 +188,43 @@ llm:
   # Azure OpenAI API version (openai provider + Azure endpoint only)
   # Example: "2024-08-01-preview"
   api_version: null
+
+# ─────────────────────────────────────────────
+# orchestration — Multi-Agent Orchestrator settings
+# ─────────────────────────────────────────────
+orchestration:
+
+  # false (default) = run the fixed sequential pipeline (backwards compatible).
+  # true = hand control to OrchestratorAgent which dynamically decides which
+  # stage to run next, auto-retries failed conversions, and auto-revises plans.
+  # Requires a live LLM (no_llm: true is incompatible with orchestration).
+  enabled: false
+
+  # true (default) = extract patterns + preferences after every run and store
+  # them in config/memory/*.json. Runs on BOTH sequential and orchestrated paths.
+  # Memory context is injected into PlanAgent + ConversionAgent prompts.
+  learning: true
+
+  # Max number of automatic plan revisions the orchestrator may trigger before
+  # escalating to a human (or failing, depending on escalate_on_fail).
+  max_plan_revisions: 2
+
+  # true = ask for human input when the orchestrator cannot resolve an ambiguity
+  # after max_plan_revisions attempts.
+  # false = fail the run immediately on unresolvable ambiguity.
+  escalate_on_fail: true
+
+  # Orchestration backend:
+  #   internal    — built-in ReAct / native-tool loop (default, no extra packages)
+  #   google_adk  — Google Agent Development Kit (requires pip install google-adk;
+  #                 auto-falls-back to internal if not installed)
+  backend: internal
+
+  # Tool-use mode for the orchestrator:
+  #   auto   — uses native_tools for Anthropic/OpenAI/Vertex AI; react_text for others
+  #   always — force native_tools (provider must support it)
+  #   never  — force react_text (THOUGHT/ACTION/PARAMS text parsing)
+  tool_use: auto
 
 # ─────────────────────────────────────────────
 # notes — free-form context for agents and reviewers
@@ -231,11 +268,17 @@ notes: |
 | `verification.commands` | `[]` | Ordered shell commands for build/test/lint verification |
 | `verification.fail_on_error` | `true` | Fail pipeline immediately on first failing command |
 | `llm.no_llm` | `false` | |
-| `llm.provider` | auto-detect | |
+| `llm.provider` | auto-detect | `anthropic` \| `openai` \| `openai_compat` \| `ollama` \| `llamacpp` \| `vertex_ai` \| `subprocess` |
 | `llm.model` | provider default | |
 | `llm.max_tokens` | `8192` | |
 | `llm.temperature` | `0.2` | |
 | `llm.timeout` | `120` | |
+| `orchestration.enabled` | `false` | `true` = LLM-driven `OrchestratorAgent`; `false` = sequential pipeline |
+| `orchestration.learning` | `true` | Extract patterns + preferences after every run |
+| `orchestration.max_plan_revisions` | `2` | Max automatic plan revisions before escalation |
+| `orchestration.escalate_on_fail` | `true` | Ask human on unresolvable ambiguity |
+| `orchestration.backend` | `internal` | `internal` \| `google_adk` |
+| `orchestration.tool_use` | `auto` | `auto` \| `always` \| `never` |
 
 ---
 
@@ -316,6 +359,58 @@ llm:
   model: "gpt-4o"
   base_url: "https://<resource>.openai.azure.com/"
   api_version: "2024-08-01-preview"
+```
+
+### Google Gemini API
+```yaml
+pipeline:
+  feature_root: "<YOUR_SOURCE_ROOT>/src/ActionHistory"
+  feature_name: "ActionHistory"
+  mode: "full"
+  target: "snake_case"
+  auto_approve: false
+
+llm:
+  provider: vertex_ai
+  model: "gemini-2.0-flash"   # or gemini-1.5-pro for higher quality
+  # GOOGLE_API_KEY must be set in your environment
+```
+
+### LLM-driven orchestration (Anthropic + internal backend)
+```yaml
+pipeline:
+  feature_root: "<YOUR_SOURCE_ROOT>/src/ActionHistory"
+  feature_name: "ActionHistory"
+  mode: "full"
+  target: "snake_case"
+
+llm:
+  provider: anthropic
+  model: "claude-opus-4-5"
+
+orchestration:
+  enabled: true          # activate OrchestratorAgent
+  learning: true         # accumulate patterns in config/memory/
+  max_plan_revisions: 2
+  escalate_on_fail: true
+  backend: internal      # built-in ReAct loop
+  tool_use: auto         # native_tools for Anthropic
+```
+
+### Learning memory only (sequential pipeline + memory)
+```yaml
+pipeline:
+  feature_root: "<YOUR_SOURCE_ROOT>/src/ActionHistory"
+  feature_name: "ActionHistory"
+  mode: "full"
+  target: "snake_case"
+
+llm:
+  provider: anthropic
+
+orchestration:
+  enabled: false   # sequential pipeline — OrchestratorAgent NOT used
+  learning: true   # but still extract patterns after the run
 ```
 
 ---
