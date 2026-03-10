@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from agents.migration_ignore import MigrationIgnore
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -71,6 +73,18 @@ class ScopingAgent:
         for rule in config.get("rules", {}).get("guardrails", []):
             self.flagged_libs.update(rule.get("flagged_libraries", []))
 
+        # RULE-011: load ignore patterns — also check for a .local override file
+        self._migration_ignore = MigrationIgnore()
+        local_override = MigrationIgnore.DEFAULT_PATH.parent / ".migrationignore.local"
+        if local_override.exists():
+            _local = MigrationIgnore(local_override)
+            # Merge local patterns on top of the base patterns
+            self._migration_ignore._patterns.extend(_local._patterns)
+            logger.debug(
+                "ScopingAgent: merged %d pattern(s) from .migrationignore.local",
+                len(_local),
+            )
+
         self.dependency_graph: dict[str, Any] = {
             "feature_name": self.feature_root.name,
             "feature_root": str(self.feature_root),
@@ -94,18 +108,35 @@ class ScopingAgent:
             raise FileNotFoundError(f"Feature root does not exist: {self.feature_root}")
 
         all_files = list(self.feature_root.rglob("*"))
-        ts_files  = [f for f in all_files if f.suffix in (".ts",) and not f.name.endswith(".d.ts")]
-        cs_files  = [f for f in all_files if f.suffix == ".cs"]
-        sql_files = [f for f in all_files if f.suffix == ".sql"]
+
+        # RULE-011: filter out ignored paths before any analysis
+        _ignored_count = 0
+        filtered_files: list[Path] = []
+        for f in all_files:
+            if self._migration_ignore.should_skip(f, root=self.feature_root):
+                logger.debug("RULE-011 skip (scoping): %s", f.relative_to(self.feature_root))
+                _ignored_count += 1
+            else:
+                filtered_files.append(f)
+        if _ignored_count:
+            logger.info(
+                "RULE-011: %d file(s) excluded by .migrationignore during scoping of %s.",
+                _ignored_count,
+                self.feature_root.name,
+            )
+
+        ts_files  = [f for f in filtered_files if f.suffix in (".ts",) and not f.name.endswith(".d.ts")]
+        cs_files  = [f for f in filtered_files if f.suffix == ".cs"]
+        sql_files = [f for f in filtered_files if f.suffix == ".sql"]
 
         logger.info(
-            "Scoping %s — found %d .ts, %d .cs, %d .sql files.",
+            "Scoping %s — found %d .ts, %d .cs, %d .sql files (after ignore filter).",
             self.feature_root.name, len(ts_files), len(cs_files), len(sql_files)
         )
 
         # Compute a stable hash over the sorted content of all source files so
         # save() can detect whether the sources have changed since the last run.
-        source_hash = self._compute_source_hash(ts_files + cs_files + sql_files)
+        source_hash = self._compute_source_hash(ts_files + cs_files + sql_files)  # uses filtered lists
 
         for f in ts_files:
             self._analyze_typescript_file(f)

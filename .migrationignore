@@ -1,0 +1,232 @@
+# =============================================================================
+# .migrationignore — AI Migration Tool path exclusion list
+# =============================================================================
+# Syntax is a subset of .gitignore:
+#   - Blank lines and lines starting with # are ignored
+#   - Lines ending with / match that directory AND everything inside it
+#   - Lines starting with ! negate a previous match (allow-list override)
+#   - * matches anything within one path segment (not /)
+#   - ** matches across path separators (any depth)
+#   - Patterns without / match against any single path segment (name or dir)
+#   - Patterns with / match against the full relative path
+#
+# This file is read by ScopingAgent (Stage 1) and ConversionAgent (Stage 5).
+# Files matching any active pattern are:
+#   - Never scanned or added to the dependency graph
+#   - Never included as conversion steps in the Plan Document
+#   - Skipped (RULE-011) if they appear in a plan that was created externally
+#
+# Safe to commit — team-wide settings live here.
+# Machine-specific overrides belong in .migrationignore.local (gitignored).
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Dependency directories
+# Files inside these dirs are third-party code, never source to migrate.
+# -----------------------------------------------------------------------------
+node_modules/
+.pnpm-store/
+.yarn/
+.npm/
+bower_components/
+jspm_packages/
+vendor/                    # PHP / Ruby / Go vendor dirs
+packages/                  # .NET NuGet restore dir
+
+
+# -----------------------------------------------------------------------------
+# Compiled / generated output — build artefacts, never source
+# -----------------------------------------------------------------------------
+dist/
+build/
+out/
+.next/
+.nuxt/
+.output/
+.svelte-kit/
+.angular/
+storybook-static/
+public/build/
+
+
+# -----------------------------------------------------------------------------
+# .NET / C# compiled artefacts
+# bin/ and obj/ contain compiled assemblies; Debug/ and Release/ are sub-dirs
+# created by MSBuild inside bin/ and obj/.
+# -----------------------------------------------------------------------------
+bin/
+obj/
+Debug/
+Release/
+*.dll
+*.pdb
+*.exe
+*.nupkg
+
+
+# -----------------------------------------------------------------------------
+# Debug artefacts and source maps
+# Source maps (.map) expose internal paths but are generated files, not source.
+# -----------------------------------------------------------------------------
+debug/
+*.debug.js
+*.min.js
+*.min.css
+*.map
+
+
+# -----------------------------------------------------------------------------
+# Python compiled / virtual environment artefacts
+# -----------------------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.env/
+site-packages/
+
+
+# -----------------------------------------------------------------------------
+# Test output and coverage reports
+# These are generated artefacts, not source to convert.
+# To include test source files in migration, comment out *.spec.* / *.test.*
+# -----------------------------------------------------------------------------
+coverage/
+.nyc_output/
+htmlcov/
+test-results/
+junit.xml
+*.snap                     # Jest / Vitest snapshot files
+
+
+# -----------------------------------------------------------------------------
+# Lock files — dependency manifests, not application source
+# -----------------------------------------------------------------------------
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+Pipfile.lock
+poetry.lock
+composer.lock
+Gemfile.lock
+
+
+# -----------------------------------------------------------------------------
+# Toolchain / build config files
+# These configure the build toolchain for the TARGET stack and are not
+# themselves features to migrate.  Comment out lines here if your migration
+# requires converting config files (e.g. migrating Jest → Vitest config).
+# -----------------------------------------------------------------------------
+tsconfig.json
+tsconfig.*.json
+jest.config.*
+vitest.config.*
+webpack.config.*
+vite.config.*
+rollup.config.*
+babel.config.*
+.babelrc
+.eslintrc*
+.eslintignore
+.prettierrc*
+.prettierignore
+.stylelintrc*
+.editorconfig
+.browserslistrc
+postcss.config.*
+tailwind.config.*
+
+
+# -----------------------------------------------------------------------------
+# IDE and editor metadata
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+nbproject/
+.project
+.classpath
+
+
+# -----------------------------------------------------------------------------
+# Version control internals
+# -----------------------------------------------------------------------------
+.git/
+.svn/
+.hg/
+.bzr/
+
+
+# -----------------------------------------------------------------------------
+# CI / CD and infrastructure files
+# Pipeline config, Dockerfiles, and Terraform are infrastructure, not features.
+# -----------------------------------------------------------------------------
+.github/
+.gitlab-ci.yml
+.circleci/
+Jenkinsfile
+Dockerfile
+docker-compose*.yml
+*.tf
+*.tfvars
+.terraform/
+k8s/
+helm/
+infra/
+infrastructure/
+
+
+# -----------------------------------------------------------------------------
+# OS noise
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+
+# -----------------------------------------------------------------------------
+# TypeScript declaration files
+# .d.ts files are generated type stubs, never application source to convert.
+# -----------------------------------------------------------------------------
+*.d.ts
+
+
+# -----------------------------------------------------------------------------
+# Minified / bundled files (already compiled, not readable source)
+# -----------------------------------------------------------------------------
+*.bundle.js
+*.chunk.js
+*.bundle.css
+*.gz
+*.br
+
+
+# -----------------------------------------------------------------------------
+# Log and temp files
+# -----------------------------------------------------------------------------
+*.log
+*.tmp
+*.temp
+*.cache
+.cache/
+tmp/
+temp/
+
+
+# =============================================================================
+# PROJECT-SPECIFIC OVERRIDES
+# Add your own patterns below this line.
+# Use ! to allow-list a path that matches an earlier pattern, e.g.:
+#   !src/bin/startup.ts    — keep this specific file even though bin/ is ignored
+# =============================================================================

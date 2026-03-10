@@ -54,6 +54,7 @@ except ImportError:
 
 from agents.agent_context import require_llm_or_raise
 from agents.conversion_log import ConversionLog
+from agents.migration_ignore import MigrationIgnore
 from prompts import load_prompt, resolve_prompt_filename
 
 if TYPE_CHECKING:
@@ -70,6 +71,9 @@ class AmbiguityException(Exception):
 
 class OutOfBoundaryException(Exception):
     """Raised when a write target falls outside the declared feature boundary."""
+
+class _SkipStep(Exception):
+    """Internal sentinel — step silently skipped due to RULE-011 (.migrationignore match)."""
 
 
 class ConversionAgent:
@@ -155,6 +159,17 @@ class ConversionAgent:
             autoescape=False,
         )
 
+        # RULE-011: load ignore patterns (+ optional .local override)
+        self._migration_ignore = MigrationIgnore()
+        _local_path = MigrationIgnore.DEFAULT_PATH.parent / ".migrationignore.local"
+        if _local_path.exists():
+            _local = MigrationIgnore(_local_path)
+            self._migration_ignore._patterns.extend(_local._patterns)
+            logger.debug(
+                "ConversionAgent: merged %d pattern(s) from .migrationignore.local",
+                len(_local),
+            )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -177,6 +192,10 @@ class ConversionAgent:
                 self._execute_step(step)
                 self.log.complete_step(step)
                 completed.append(step_id)
+            except _SkipStep as exc:
+                # RULE-011: silently skipped — not a failure, not a flag
+                logger.info("[%s] SKIPPED (RULE-011) -- %s", step_id, exc)
+                skipped.append({"step": step_id, "reason": str(exc)})
             except AmbiguityException as exc:
                 msg = str(exc)
                 logger.warning("[%s] AMBIGUOUS -- %s", step_id, msg)
@@ -229,8 +248,25 @@ class ConversionAgent:
         rule_ids    = step.get("rule_ids", ["RULE-003"])
         rationale   = step.get("rationale", "")
 
+        # RULE-011: skip files that match .migrationignore patterns
+        feature_root = Path(self.plan["feature_root"])
+        source_path  = feature_root / source_rel
+        if self._migration_ignore.should_skip(source_path, root=feature_root):
+            reason = (
+                f"RULE-011: source file '{source_rel}' matches an active .migrationignore "
+                f"pattern — skipping conversion step {step.get('id', '?')}."
+            )
+            logger.info(reason)
+            self.log.record(
+                "skipped_ignored_file",
+                source_file=str(source_path),
+                plan_step_ref=step.get("id", "?"),
+                rule_applied="RULE-011",
+                rationale=reason,
+            )
+            raise _SkipStep(reason)
+
         # 1. Read source file
-        source_path = Path(self.plan["feature_root"]) / source_rel
         if not source_path.exists():
             raise AmbiguityException(f"Source file not found: {source_path}")
 
