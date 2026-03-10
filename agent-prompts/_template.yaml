@@ -49,11 +49,46 @@ pipeline:
 
 # ── Integration (Stage 7) ──────────────────────────────────────────────────
 # Runs after validation. Places output files into target_root, syncs
-# dependencies, verifies structural alignment, and generates migration scripts.
+# dependencies, updates barrel files and __init__.py exports, verifies
+# structural alignment, generates migration scripts, and optionally runs a
+# post-placement build command.
 integration:
   enabled: true            # set false to skip Stage 7 entirely
   add_dependencies: true   # auto-add missing Python deps to requirements.txt
   generate_migration: true # generate DB migration script if model changes detected
+
+  # ── New build-integration options ──────────────────────────────────────
+  # Write missing JS packages to package.json dependencies (version="*").
+  # You still need to run `npm install` afterward. Default: false (report only).
+  update_package_json: false
+
+  # Update the nearest index.ts in each destination directory to export the
+  # newly placed TypeScript/React module. Creates index.ts if missing.
+  update_barrel_files: true
+
+  # Append `from . import <module>` to __init__.py in each destination directory
+  # for newly placed Python files. Creates __init__.py if missing.
+  update_python_inits: true
+
+  # Add path aliases to tsconfig.json compilerOptions.paths for new directories.
+  # Opt-in (false by default) because it modifies a shared project config file.
+  update_tsconfig_paths: false
+
+  # Shell command to run in target_root after all files are placed.
+  # Useful for verifying the build still compiles. Examples:
+  #   "npm run build"    — TypeScript / Next.js build
+  #   "tsc --noEmit"     — TypeScript type-check only
+  #   "python -m pytest" — Python test suite
+  # Leave null to skip. Command is skipped if any placement conflict occurred.
+  post_placement_command: null
+
+  # Timeout in seconds for post_placement_command (default: 300)
+  post_placement_timeout: 300
+
+  # Generate minimal Playwright E2E test stubs for each placed TSX/JSX component.
+  # Stubs are written to target_root/tests/e2e/<ComponentName>.spec.ts.
+  # Opt-in (false by default). Pair with verification.tool: playwright to run them.
+  generate_playwright_stubs: false
 
 # ── UI Consistency Audit (Stage 6b) ───────────────────────────────────────
 # Compares Angular source template against converted React/TSX output.
@@ -68,8 +103,13 @@ ui_consistency:
 # Commands are auto-detected from the target codebase (package.json / pyproject.toml /
 # Makefile) and verification.enabled is flipped to true automatically when found.
 # Override by setting commands and enabled explicitly below.
+#
+# Playwright mode: set tool: playwright to auto-detect playwright.config.ts/js
+# in target_root and run `npx playwright test --reporter=list` automatically.
+# (requires integration.generate_playwright_stubs: true or pre-existing specs)
 verification:
   enabled: false           # auto-set to true when commands are auto-detected
+  tool: commands           # commands (default) | playwright
   cwd: null                # null => target_root (auto-resolved); set explicitly to override
   commands: []             # leave empty for auto-detection, or specify explicitly
   env: {}

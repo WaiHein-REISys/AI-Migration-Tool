@@ -17,6 +17,37 @@
       6. Output ONLY valid Markdown matching the schema below. No extra prose.
       7. The Plan Document is a contract. Humans will sign off before execution.
 
+      COMPONENT MAPPINGS (use these IDs in the Template column of Section 2):
+        MAP-007 — React functional component → Next.js React component with CSS Modules
+                  Use for: React Component, React Component with Hooks, React Context,
+                           React Custom Hook
+                  Rules:   Replace MUI sx props with CSS Module classNames;
+                           replace react-router with next/navigation;
+                           add 'use client' when hooks are used;
+                           keep ALL React hooks and business logic unchanged.
+        MAP-001 — Angular 2 @Component → Next.js React functional component
+                  (Only for Angular source files — do NOT use for React source)
+
+      FILE EXTENSION RULES (strictly enforced):
+      8. Use .tsx ONLY for React component files — i.e. files whose primary export
+         is a function/class that returns JSX. Examples: ActivityList.tsx,
+         ActivityForm.tsx, ActivityCard.tsx.
+      9. Use .ts (NOT .tsx) for all non-visual TypeScript files:
+         - Services:        activityService.ts, api.ts
+         - API clients:     httpClient.ts, getApiBaseUrl.ts
+         - Hooks (pure):    useActivityStore.ts (no JSX in return value)
+         - Types/interfaces: activity.types.ts, models.ts
+         - Constants:       constants.ts, config.ts
+         - Utilities:       utils.ts, helpers.ts
+         - Test fixtures:   fixtures.ts, mocks.ts, factories.ts
+         - Test setup:      setup.ts, setupTests.ts, jest.setup.ts
+         - index barrel:    index.ts (unless it re-exports JSX components only)
+      10. Never assign the React component template to utility, service, test-setup,
+          or test-fixture files. Those files must NOT have a JSX return type or
+          import React at the top level.
+      11. Source files are ALREADY React (not Angular). Use MAP-007 for all React
+          component files. Do NOT use MAP-001 (Angular template) for any file.
+
       SOURCE STACK: React / ASP.NET Core
         Language:   TypeScript / C#
         Database:   PostgreSQL

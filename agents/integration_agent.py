@@ -2,7 +2,7 @@
 Integration Agent
 =================
 Stage 7 of the AI Migration Tool pipeline.  Runs after the Validation Agent
-and is responsible for four tasks:
+and is responsible for six tasks:
 
   1. **File Placement** — copy converted files from ``output/<feature>/`` into
      the correct locations within the actual ``target_root`` codebase, using the
@@ -10,21 +10,51 @@ and is responsible for four tasks:
 
   2. **Dependency Sync** — scan generated code for new imports and add any
      missing third-party packages to ``target_root/requirements.txt`` (Python)
-     or flag them for ``npm install`` (JS/TS).
+     or write them to ``target_root/package.json`` (JS/TS, opt-in).
 
-  3. **Type-specific Verification** — LLM-powered structural checks:
+  3. **Barrel File Updates** — after placing TypeScript/React files, update the
+     nearest ``index.ts`` in the destination directory to export the new module.
+     A new ``index.ts`` is created if one does not yet exist.
+
+  4. **Python __init__.py Updates** — after placing ``.py`` files, update or
+     create the ``__init__.py`` in the destination directory to import the new
+     module.
+
+  5. **tsconfig.json Path Aliases** (opt-in) — if new directories are created,
+     add corresponding path aliases to ``compilerOptions.paths`` in the
+     project's ``tsconfig.json``.
+
+  6. **Type-specific Verification** — LLM-powered structural checks:
      - UI files (.tsx/.ts/.jsx/.scss): component structure, prop types, USWDS
        class usage, event handlers, business logic parity.
      - Backend files (.py): alignment with existing models/entities in
        ``target_root``, naming conventions, data layer consistency.
 
-  4. **Migration Script Generation** — if the backend check flags
+  7. **Migration Script Generation** — if the backend check flags
      ``needs_migration=True``, generate an Alembic revision (SQLAlchemy targets)
      or raw SQL ALTER TABLE script (psycopg2/hrsa targets).
+
+  8. **Post-placement Build Command** — optionally run a shell command (e.g.
+     ``npm run build`` or ``tsc --noEmit``) after all files are placed to verify
+     the integration succeeded.  Configured via ``integration.post_placement_command``.
+
+  9. **Playwright Test Stub Generation** (opt-in) — for each placed TSX/JSX
+     component, generate a minimal ``tests/e2e/<ComponentName>.spec.ts`` stub
+     that can be committed and extended by the team.  Activated via
+     ``integration.generate_playwright_stubs: true``.
 
 Conflict policy: if a file already exists in ``target_root`` with different
 content the placement is skipped and the step is flagged for human review.
 Identical content is silently skipped (idempotent re-runs).
+
+New config keys (``integration:`` block in job YAML)
+------------------------------------------------------
+  update_package_json: false         # true = write missing JS packages to package.json
+  update_barrel_files: true          # false = skip index.ts export updates
+  update_python_inits: true          # false = skip __init__.py updates
+  update_tsconfig_paths: false       # true = add path aliases to tsconfig.json (opt-in)
+  post_placement_command: null       # shell command to run after placement (e.g. "npm run build")
+  generate_playwright_stubs: false   # true = emit tests/e2e/<Component>.spec.ts stubs
 """
 
 from __future__ import annotations
@@ -32,8 +62,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
+import shlex
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -50,11 +83,39 @@ _STDLIB_EXTRAS: frozenset[str] = frozenset({"__future__", "typing", "typing_exte
 # Suffixes that indicate UI/frontend files
 _UI_SUFFIXES: frozenset[str] = frozenset({".tsx", ".jsx", ".scss", ".css"})
 
+# Barrel file names to look for / create
+_BARREL_NAMES: tuple[str, ...] = ("index.ts", "index.tsx")
+
+# JS/TS keywords and primitive-type names that can appear as quoted string literals
+# inside ordinary expressions (e.g. ``typeof x !== 'undefined'``) but are never
+# package names.  Used by _sync_js_deps to filter false-positive import detections.
+_JS_NON_PACKAGE_LITERALS: frozenset[str] = frozenset({
+    "undefined", "null", "true", "false",
+    "string", "number", "boolean", "object", "any",
+    "void", "never", "unknown", "symbol", "bigint",
+    "function", "class", "module", "global",
+})
+
+# Anchored import/require detector — only matches actual ES-module import
+# statements and CommonJS require() / dynamic import() calls.
+# Previous pattern  ['"]([@\w][\w-./]*)['"]  was too greedy and matched
+# any quoted word, including  'undefined'  in  typeof x !== 'undefined'.
+_IMPORT_PATTERN = re.compile(
+    r"(?:"
+    r"(?:^[ \t]*import\b[^'\"\n;]*?from\s*['\"])"   # import X from 'pkg'
+    r"|(?:^[ \t]*import\s+['\"])"                    # import 'side-effect'
+    r"|(?:\brequire\s*\(\s*['\"])"                   # require('pkg')
+    r"|(?:(?:^|[(\s,;])import\s*\(\s*['\"])"         # import('dynamic')
+    r")([@\w][\w\-./]*)['\"]",
+    re.MULTILINE,
+)
+
 
 class IntegrationAgent:
     """
-    Place converted files into ``target_root``, sync dependencies, verify
-    structural correctness, and generate migration scripts as needed.
+    Place converted files into ``target_root``, sync dependencies, update
+    barrel files and __init__.py exports, verify structural correctness,
+    and generate migration scripts as needed.
     """
 
     def __init__(
@@ -107,14 +168,20 @@ class IntegrationAgent:
 
         Returns
         -------
-        dict with keys: status, placements, dependency_updates,
-        migration_scripts, verification_findings, report_json, report_md.
+        dict with keys: status, placements, dependency_updates, barrel_updates,
+        init_updates, tsconfig_updates, migration_scripts, verification_findings,
+        post_placement_result, report_json, report_md.
         """
         _skip_base = {
             "placements": [],
             "dependency_updates": {},
+            "barrel_updates": [],
+            "init_updates": [],
+            "tsconfig_updates": [],
+            "playwright_stubs": [],
             "migration_scripts": [],
             "verification_findings": [],
+            "post_placement_result": {},
             "report_json": None,
             "report_md": None,
         }
@@ -191,9 +258,9 @@ class IntegrationAgent:
 
             if placement["status"] == "placed":
                 if file_type == "ui":
-                    ui_placed.append({**file_entry, "dst": dst, "type": "ui"})
+                    ui_placed.append({**file_entry, "dst": str(dst), "type": "ui"})
                 elif file_type == "backend":
-                    backend_placed.append({**file_entry, "dst": dst, "type": "backend"})
+                    backend_placed.append({**file_entry, "dst": str(dst), "type": "backend"})
 
         # ---- 3. Dependency sync ------------------------------------------
         dep_updates: dict[str, Any] = {}
@@ -204,7 +271,31 @@ class IntegrationAgent:
             ts_files = [Path(e["dst"]) for e in ui_placed if e.get("dst")
                         and Path(e["dst"]).suffix in {".ts", ".tsx"}]
             dep_updates["python"] = self._sync_python_deps(py_files)
-            dep_updates["js"] = self._sync_js_deps(ts_files)
+            dep_updates["js"] = self._sync_js_deps(
+                ts_files,
+                update_pkg_json=self.integration_config.get("update_package_json", False),
+            )
+
+        # ---- 3b. Barrel file updates (TypeScript index.ts) ---------------
+        barrel_updates: list[dict] = []
+        if self.integration_config.get("update_barrel_files", True) and ui_placed:
+            barrel_updates = self._update_barrel_files(ui_placed)
+
+        # ---- 3c. Python __init__.py updates ------------------------------
+        init_updates: list[dict] = []
+        if self.integration_config.get("update_python_inits", True) and backend_placed:
+            init_updates = self._update_python_inits(backend_placed)
+
+        # ---- 3d. tsconfig.json path alias updates (opt-in) ---------------
+        tsconfig_updates: list[dict] = []
+        if self.integration_config.get("update_tsconfig_paths", False):
+            all_placed = ui_placed + backend_placed
+            tsconfig_updates = self._update_tsconfig_paths(all_placed)
+
+        # ---- 3e. Playwright test stub generation (opt-in) ----------------
+        playwright_stubs: list[dict] = []
+        if self.integration_config.get("generate_playwright_stubs", False) and ui_placed:
+            playwright_stubs = self._generate_playwright_stubs(ui_placed)
 
         # ---- 4. UI verification ------------------------------------------
         for entry in ui_placed:
@@ -248,15 +339,34 @@ class IntegrationAgent:
         )
         status = "partial" if (has_conflict or has_fail) else "integrated"
 
-        # ---- 8. Write report --------------------------------------------
+        # ---- 8. Post-placement build command ----------------------------
+        post_cmd_result: dict = {}
+        post_cmd = (self.integration_config.get("post_placement_command") or "").strip()
+        if post_cmd and status == "integrated":
+            logger.info("[Integration] Running post-placement command: %s", post_cmd)
+            post_cmd_result = self._run_post_placement_command(post_cmd)
+            if post_cmd_result.get("returncode", 0) != 0:
+                logger.warning(
+                    "[Integration] Post-placement command failed (exit %d): %s",
+                    post_cmd_result.get("returncode"),
+                    post_cmd_result.get("stderr", "")[:300],
+                )
+                status = "partial"
+
+        # ---- 9. Write report --------------------------------------------
         report = {
             "run_id": self.run_id,
             "status": status,
             "target_root": str(self.target_root),
             "placements": placements,
             "dependency_updates": dep_updates,
+            "barrel_updates": barrel_updates,
+            "init_updates": init_updates,
+            "tsconfig_updates": tsconfig_updates,
+            "playwright_stubs": playwright_stubs,
             "migration_scripts": migration_scripts,
             "verification_findings": verification_findings,
+            "post_placement_result": post_cmd_result,
         }
         json_path, md_path = self._write_report(report)
         report["report_json"] = str(json_path)
@@ -468,54 +578,500 @@ class IntegrationAgent:
     # Dependency sync — JavaScript / TypeScript
     # ------------------------------------------------------------------
 
-    def _sync_js_deps(self, ts_files: list[Path]) -> dict:
+    def _sync_js_deps(self, ts_files: list[Path], *, update_pkg_json: bool = False) -> dict:
         """
-        Parse ``import … from 'pkg'`` statements and report packages that are
-        not already in ``package.json``.  Does NOT auto-write ``package.json``
-        (avoids running npm install unexpectedly).
+        Parse ``import … from 'pkg'`` statements from generated TS/TSX files.
+
+        When ``update_pkg_json=False`` (default): reports packages that need
+        installing but does NOT modify ``package.json``.
+
+        When ``update_pkg_json=True`` (``integration.update_package_json: true``
+        in job YAML): writes missing packages to the ``dependencies`` section of
+        ``target_root/package.json`` with a placeholder version of ``"*"``.
+        ``npm install`` still needs to be run afterward to actually fetch them.
         """
-        result: dict[str, list] = {"needs_install": [], "already_present": []}
+        result: dict[str, Any] = {
+            "added_to_package_json": [],
+            "needs_install": [],
+            "already_present": [],
+        }
         pkg_json_path = self.target_root / "package.json"
 
         if not ts_files:
             return result
 
         existing: set[str] = set()
+        pkg_data: dict = {}
         if pkg_json_path.exists():
             try:
                 pkg_data = json.loads(pkg_json_path.read_text(encoding="utf-8"))
-                existing = set(pkg_data.get("dependencies", {}).keys()) | \
-                           set(pkg_data.get("devDependencies", {}).keys())
+                existing = (
+                    set(pkg_data.get("dependencies", {}).keys())
+                    | set(pkg_data.get("devDependencies", {}).keys())
+                )
             except Exception:
                 pass
 
-        import_pattern = re.compile(r"""['"]([@\w][\w\-./]*)['"]""")
         third_party_pattern = re.compile(r"^[^./]")  # must not start with . or /
 
+        missing: list[str] = []
         for ts_file in ts_files:
             if not ts_file.exists():
                 continue
             code = ts_file.read_text(encoding="utf-8", errors="replace")
-            for match in import_pattern.finditer(code):
+            for match in _IMPORT_PATTERN.finditer(code):
                 pkg_raw = match.group(1)
                 # Normalise scoped packages: @org/pkg → @org/pkg
                 parts = pkg_raw.split("/")
                 pkg = "/".join(parts[:2]) if pkg_raw.startswith("@") else parts[0]
                 if not third_party_pattern.match(pkg):
                     continue
+                # Skip JS keywords / TypeScript primitive names that appear as
+                # string literals in expressions (e.g. typeof x !== 'undefined')
+                if pkg in _JS_NON_PACKAGE_LITERALS:
+                    continue
                 if pkg in existing:
                     if pkg not in result["already_present"]:
                         result["already_present"].append(pkg)
                 else:
-                    if pkg not in result["needs_install"]:
-                        result["needs_install"].append(pkg)
+                    if pkg not in missing:
+                        missing.append(pkg)
 
-        if result["needs_install"]:
-            logger.warning(
-                "[Integration] %d JS package(s) may need installing: %s",
-                len(result["needs_install"]),
-                result["needs_install"],
+        if not missing:
+            return result
+
+        if update_pkg_json and pkg_json_path.exists():
+            # Write missing packages to package.json dependencies with version "*"
+            # (placeholder — real version pinning should be done manually / by npm install)
+            deps = pkg_data.setdefault("dependencies", {})
+            for pkg in missing:
+                if pkg not in deps and pkg not in pkg_data.get("devDependencies", {}):
+                    deps[pkg] = "*"
+            try:
+                pkg_json_path.write_text(
+                    json.dumps(pkg_data, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+                result["added_to_package_json"] = sorted(missing)
+                logger.info(
+                    "[Integration] Added %d JS package(s) to package.json (version='*'): %s",
+                    len(missing),
+                    missing,
+                )
+                logger.info(
+                    "[Integration] Run `npm install` in %s to install the added packages.",
+                    self.target_root,
+                )
+            except OSError as exc:
+                logger.warning("[Integration] Could not update package.json: %s", exc)
+                result["needs_install"] = sorted(missing)
+        else:
+            result["needs_install"] = sorted(missing)
+            if missing:
+                logger.warning(
+                    "[Integration] %d JS package(s) may need installing: %s",
+                    len(missing),
+                    missing,
+                )
+                if not update_pkg_json:
+                    logger.info(
+                        "[Integration] Set integration.update_package_json: true in the job "
+                        "YAML to have these written to package.json automatically."
+                    )
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Barrel file updates (TypeScript index.ts)
+    # ------------------------------------------------------------------
+
+    def _update_barrel_files(self, ui_placed: list[dict]) -> list[dict]:
+        """
+        After placing TypeScript/React files, update the nearest ``index.ts``
+        (or ``index.tsx``) in each destination directory to export the new
+        module.  Creates a new ``index.ts`` if one does not already exist.
+
+        Export strategy:
+        - If the placed file contains ``export default``, emit
+          ``export { default as <Name> } from './<Name>';``
+        - Otherwise emit ``export * from './<Name>';``
+
+        Returns a list of update records:
+          {"barrel": str, "module": str, "status": "appended"|"created"|"skipped"|"error"}
+        """
+        updates: list[dict] = []
+        # Track which barrel files we've already processed (one update record per barrel)
+        barrel_exports: dict[Path, list[str]] = {}
+
+        for entry in ui_placed:
+            dst = Path(entry["dst"])
+            suffix = dst.suffix.lower()
+            if suffix not in {".ts", ".tsx", ".jsx"}:
+                continue
+            if dst.stem.lower() in {"index", "index.tsx"}:
+                continue  # skip barrel files themselves
+
+            barrel_dir = dst.parent
+            module_name = dst.stem  # filename without extension
+
+            # Determine export style by scanning the placed file
+            file_content = ""
+            try:
+                file_content = dst.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+            has_default_export = bool(re.search(r"\bexport\s+default\b", file_content))
+
+            if has_default_export:
+                export_line = f"export {{ default as {module_name} }} from './{module_name}';"
+            else:
+                export_line = f"export * from './{module_name}';"
+
+            barrel_exports.setdefault(barrel_dir, []).append(export_line)
+
+        for barrel_dir, export_lines in barrel_exports.items():
+            # Find existing barrel file
+            barrel_path: Path | None = None
+            for name in _BARREL_NAMES:
+                candidate = barrel_dir / name
+                if candidate.exists():
+                    barrel_path = candidate
+                    break
+
+            if barrel_path is None:
+                # Create a new index.ts
+                barrel_path = barrel_dir / "index.ts"
+
+            try:
+                existing_content = ""
+                if barrel_path.exists():
+                    existing_content = barrel_path.read_text(encoding="utf-8", errors="replace")
+
+                lines_to_add = [
+                    line for line in export_lines
+                    if line not in existing_content
+                ]
+
+                if not lines_to_add:
+                    for line in export_lines:
+                        updates.append({
+                            "barrel": str(barrel_path),
+                            "module": line,
+                            "status": "skipped_already_present",
+                        })
+                    continue
+
+                header = f"\n// added by ai-migration-tool ({self.run_id})\n"
+                addition = header + "\n".join(lines_to_add) + "\n"
+
+                if barrel_path.exists():
+                    barrel_path.write_text(
+                        existing_content + addition,
+                        encoding="utf-8",
+                    )
+                    action = "appended"
+                else:
+                    barrel_path.parent.mkdir(parents=True, exist_ok=True)
+                    barrel_path.write_text(addition.lstrip(), encoding="utf-8")
+                    action = "created"
+
+                logger.info(
+                    "[Integration] %s barrel file %s (+%d export(s))",
+                    action.capitalize(),
+                    barrel_path,
+                    len(lines_to_add),
+                )
+                for line in lines_to_add:
+                    updates.append({
+                        "barrel": str(barrel_path),
+                        "module": line,
+                        "status": action,
+                    })
+
+            except OSError as exc:
+                logger.warning("[Integration] Could not update barrel file %s: %s", barrel_path, exc)
+                for line in export_lines:
+                    updates.append({
+                        "barrel": str(barrel_path),
+                        "module": line,
+                        "status": "error",
+                        "error": str(exc),
+                    })
+
+        return updates
+
+    # ------------------------------------------------------------------
+    # Python __init__.py updates
+    # ------------------------------------------------------------------
+
+    def _update_python_inits(self, backend_placed: list[dict]) -> list[dict]:
+        """
+        After placing ``.py`` files, update or create ``__init__.py`` in each
+        destination directory so the new module is importable from the package.
+
+        Appends ``from . import <module_name>`` for each new module, skipping
+        files that are already referenced in the existing ``__init__.py``.
+
+        Returns a list of update records:
+          {"init": str, "module": str, "status": "appended"|"created"|"skipped"|"error"}
+        """
+        updates: list[dict] = []
+        # Group modules by their destination directory
+        dir_modules: dict[Path, list[str]] = {}
+
+        for entry in backend_placed:
+            dst = Path(entry["dst"])
+            if dst.suffix.lower() != ".py":
+                continue
+            if dst.stem in {"__init__", "conftest", "setup"}:
+                continue  # skip special files
+
+            module_name = dst.stem
+            dir_modules.setdefault(dst.parent, []).append(module_name)
+
+        for pkg_dir, modules in dir_modules.items():
+            init_path = pkg_dir / "__init__.py"
+            try:
+                existing_content = ""
+                if init_path.exists():
+                    existing_content = init_path.read_text(encoding="utf-8", errors="replace")
+
+                modules_to_add = [
+                    m for m in modules
+                    if f"import {m}" not in existing_content
+                    and f"from . import {m}" not in existing_content
+                ]
+
+                if not modules_to_add:
+                    for m in modules:
+                        updates.append({
+                            "init": str(init_path),
+                            "module": m,
+                            "status": "skipped_already_present",
+                        })
+                    continue
+
+                import_lines = [f"from . import {m}" for m in sorted(modules_to_add)]
+                header = f"\n# added by ai-migration-tool ({self.run_id})\n"
+                addition = header + "\n".join(import_lines) + "\n"
+
+                if init_path.exists():
+                    init_path.write_text(
+                        existing_content + addition,
+                        encoding="utf-8",
+                    )
+                    action = "appended"
+                else:
+                    init_path.parent.mkdir(parents=True, exist_ok=True)
+                    init_path.write_text(addition.lstrip(), encoding="utf-8")
+                    action = "created"
+
+                logger.info(
+                    "[Integration] %s __init__.py at %s (+%d module(s)): %s",
+                    action.capitalize(),
+                    init_path,
+                    len(modules_to_add),
+                    modules_to_add,
+                )
+                for m in modules_to_add:
+                    updates.append({
+                        "init": str(init_path),
+                        "module": m,
+                        "status": action,
+                    })
+
+            except OSError as exc:
+                logger.warning("[Integration] Could not update __init__.py at %s: %s", pkg_dir, exc)
+                for m in modules:
+                    updates.append({
+                        "init": str(init_path),
+                        "module": m,
+                        "status": "error",
+                        "error": str(exc),
+                    })
+
+        return updates
+
+    # ------------------------------------------------------------------
+    # tsconfig.json path alias updates (opt-in)
+    # ------------------------------------------------------------------
+
+    def _update_tsconfig_paths(self, all_placed: list[dict]) -> list[dict]:
+        """
+        Add path aliases to ``compilerOptions.paths`` in ``tsconfig.json``
+        for any new directories created during placement.
+
+        Alias pattern: ``@<dir_name>/*`` → ``["./<rel_path>/*"]``
+
+        Only adds aliases for directories that:
+        1. Were newly created as direct children of ``src/`` (or equivalent).
+        2. Do not already have an alias in ``tsconfig.json``.
+
+        Returns a list of update records:
+          {"tsconfig": str, "alias": str, "path": str, "status": "added"|"skipped"|"error"}
+        """
+        updates: list[dict] = []
+
+        # Find tsconfig.json: prefer target_root/tsconfig.json, fallback to src/
+        tsconfig_candidates = [
+            self.target_root / "tsconfig.json",
+            self.target_root / "tsconfig.base.json",
+        ]
+        tsconfig_path: Path | None = None
+        for c in tsconfig_candidates:
+            if c.exists():
+                tsconfig_path = c
+                break
+
+        if tsconfig_path is None:
+            logger.debug("[Integration] No tsconfig.json found in target_root — skipping path alias update.")
+            return updates
+
+        # Load tsconfig, stripping line comments (JSONC format)
+        try:
+            raw = tsconfig_path.read_text(encoding="utf-8", errors="replace")
+            # Strip single-line // comments (simple approach — doesn't handle all edge cases)
+            stripped = re.sub(r"//[^\n]*", "", raw)
+            tsconfig_data: dict = json.loads(stripped)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("[Integration] Could not parse %s: %s", tsconfig_path, exc)
+            updates.append({
+                "tsconfig": str(tsconfig_path),
+                "alias": "",
+                "path": "",
+                "status": "error",
+                "error": str(exc),
+            })
+            return updates
+
+        compiler_opts = tsconfig_data.setdefault("compilerOptions", {})
+        existing_paths: dict[str, list] = compiler_opts.setdefault("paths", {})
+
+        # Collect newly created directories from placements
+        new_dirs: set[Path] = set()
+        for entry in all_placed:
+            dst = Path(entry["dst"])
+            try:
+                rel = dst.parent.relative_to(self.target_root)
+            except ValueError:
+                continue
+            parts = rel.parts
+            # Only create aliases for directories directly under src/ (or root)
+            if len(parts) >= 2 and parts[0] in {"src", "app", "components", "lib"}:
+                top_level_dir = self.target_root / parts[0] / parts[1]
+                new_dirs.add(top_level_dir)
+
+        modified = False
+        for new_dir in sorted(new_dirs):
+            dir_name = new_dir.name
+            alias_key = f"@{dir_name}/*"
+            if alias_key in existing_paths:
+                updates.append({
+                    "tsconfig": str(tsconfig_path),
+                    "alias": alias_key,
+                    "path": "",
+                    "status": "skipped_already_present",
+                })
+                continue
+
+            try:
+                rel_dir = new_dir.relative_to(self.target_root)
+            except ValueError:
+                continue
+            alias_value = f"./{rel_dir.as_posix()}/*"
+            existing_paths[alias_key] = [alias_value]
+            modified = True
+            updates.append({
+                "tsconfig": str(tsconfig_path),
+                "alias": alias_key,
+                "path": alias_value,
+                "status": "added",
+            })
+            logger.info(
+                "[Integration] Added tsconfig path alias: %s → %s",
+                alias_key,
+                alias_value,
             )
+
+        if modified:
+            try:
+                tsconfig_path.write_text(
+                    json.dumps(tsconfig_data, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+                logger.info("[Integration] Updated %s with %d new path alias(es).", tsconfig_path, modified)
+            except OSError as exc:
+                logger.warning("[Integration] Could not write %s: %s", tsconfig_path, exc)
+
+        return updates
+
+    # ------------------------------------------------------------------
+    # Post-placement build command
+    # ------------------------------------------------------------------
+
+    def _run_post_placement_command(self, command: str) -> dict:
+        """
+        Run a shell command in ``target_root`` after all files are placed.
+
+        This is intended for commands like ``npm run build``, ``tsc --noEmit``,
+        or ``python -m pytest`` that verify the integration succeeded.
+
+        The command is executed in a subprocess with a timeout of 300 seconds.
+        stdout and stderr are captured and included in the result dict.
+
+        Returns a dict with keys: command, cwd, returncode, stdout, stderr, error.
+        """
+        cwd = str(self.target_root) if self.target_root else None
+        result: dict[str, Any] = {
+            "command": command,
+            "cwd": cwd,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "",
+        }
+        try:
+            cmd_parts = shlex.split(command)
+        except ValueError:
+            cmd_parts = command.split()
+
+        timeout = self.integration_config.get("post_placement_timeout", 300)
+
+        try:
+            proc = subprocess.run(
+                cmd_parts,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                env={**os.environ},
+            )
+            result["returncode"] = proc.returncode
+            result["stdout"] = proc.stdout.strip()
+            result["stderr"] = proc.stderr.strip()
+
+            if proc.returncode == 0:
+                logger.info(
+                    "[Integration] Post-placement command succeeded (exit 0): %s",
+                    command,
+                )
+            else:
+                logger.warning(
+                    "[Integration] Post-placement command failed (exit %d): %s",
+                    proc.returncode,
+                    command,
+                )
+
+        except subprocess.TimeoutExpired:
+            result["returncode"] = -1
+            result["error"] = f"Command timed out after {timeout}s"
+            logger.warning("[Integration] Post-placement command timed out: %s", command)
+        except OSError as exc:
+            result["returncode"] = -1
+            result["error"] = str(exc)
+            logger.warning("[Integration] Post-placement command OS error: %s", exc)
+
         return result
 
     # ------------------------------------------------------------------
@@ -750,6 +1306,84 @@ class IntegrationAgent:
         return match.group(1).strip() if match else text
 
     # ------------------------------------------------------------------
+    # Playwright test stub generation
+    # ------------------------------------------------------------------
+
+    def _generate_playwright_stubs(self, ui_placed: list[dict]) -> list[dict]:
+        """
+        Generate minimal Playwright E2E test stubs for each placed TSX/JSX
+        component.  Stubs are written to ``target_root/tests/e2e/<Name>.spec.ts``.
+
+        Returns a list of records with keys: component, stub, status.
+        """
+        results: list[dict] = []
+        for entry in ui_placed:
+            dst = Path(entry.get("dst", ""))
+            if dst.suffix not in {".tsx", ".jsx"}:
+                continue
+
+            component_name = dst.stem
+            # Route guess: PascalCase → kebab-case  (e.g. ActionHistory → /action-history)
+            route_guess = (
+                "/" + re.sub(r"([A-Z])", r"-\1", component_name).lstrip("-").lower()
+            )
+            stub_rel = f"tests/e2e/{component_name}.spec.ts"
+            stub_path = self.target_root / stub_rel
+
+            if stub_path.exists():
+                logger.debug("[Integration] Playwright stub already exists: %s", stub_path)
+                results.append({
+                    "component": component_name,
+                    "stub": str(stub_path),
+                    "status": "skipped_exists",
+                })
+                continue
+
+            try:
+                stub_path.parent.mkdir(parents=True, exist_ok=True)
+                stub_path.write_text(
+                    self._render_playwright_stub(component_name, route_guess),
+                    encoding="utf-8",
+                )
+                logger.info("[Integration] Playwright stub created: %s", stub_path)
+                results.append({
+                    "component": component_name,
+                    "stub": str(stub_path),
+                    "status": "created",
+                })
+            except OSError as exc:
+                logger.warning("[Integration] Could not write Playwright stub %s: %s", stub_path, exc)
+                results.append({
+                    "component": component_name,
+                    "stub": str(stub_path),
+                    "status": "error",
+                    "error": str(exc),
+                })
+
+        return results
+
+    @staticmethod
+    def _render_playwright_stub(component_name: str, route_guess: str) -> str:
+        """Return the content of a minimal Playwright spec file."""
+        return (
+            'import { test, expect } from "@playwright/test";\n'
+            "\n"
+            "// Auto-generated by ai-migration-tool\n"
+            "// Fill in the correct route, selectors, and assertions.\n"
+            f'test.describe("{component_name}", () => {{\n'
+            '  test("renders without crashing", async ({ page }) => {\n'
+            f'    await page.goto("{route_guess}");\n'
+            "    await expect(page).toHaveTitle(/.+/);\n"
+            "  });\n"
+            "\n"
+            '  test("primary user flow", async ({ page }) => {\n'
+            f'    await page.goto("{route_guess}");\n'
+            f"    // TODO: add assertions for {component_name} behaviour\n"
+            "  });\n"
+            "});\n"
+        )
+
+    # ------------------------------------------------------------------
     # Reporting
     # ------------------------------------------------------------------
 
@@ -768,11 +1402,21 @@ class IntegrationAgent:
         conflicts = [p for p in placements if p.get("status") == "conflict"]
         dep = report.get("dependency_updates", {})
         py_added = dep.get("python", {}).get("added", [])
+        js_pkg_added = dep.get("js", {}).get("added_to_package_json", [])
         js_needs = dep.get("js", {}).get("needs_install", [])
+        barrel_updates = report.get("barrel_updates", [])
+        barrel_changed = [u for u in barrel_updates if u.get("status") in {"appended", "created"}]
+        init_updates = report.get("init_updates", [])
+        init_changed = [u for u in init_updates if u.get("status") in {"appended", "created"}]
+        tsconfig_updates = report.get("tsconfig_updates", [])
+        tsconfig_added = [u for u in tsconfig_updates if u.get("status") == "added"]
+        playwright_stubs = report.get("playwright_stubs", [])
+        playwright_created = [s for s in playwright_stubs if s.get("status") == "created"]
         migrations = report.get("migration_scripts", [])
         findings = report.get("verification_findings", [])
         fails = [f for f in findings if f.get("status") == "FAIL"]
         warns = [f for f in findings if f.get("status") == "WARN"]
+        post_cmd = report.get("post_placement_result", {})
 
         lines = [
             f"# Integration Report — {report['run_id']}",
@@ -782,7 +1426,12 @@ class IntegrationAgent:
             f"- **Files placed:** {len(placed)} / {len(placements)}",
             f"- **Conflicts:** {len(conflicts)}",
             f"- **Python deps added:** {len(py_added)}",
-            f"- **JS packages needing install:** {len(js_needs)}",
+            f"- **JS packages written to package.json:** {len(js_pkg_added)}",
+            f"- **JS packages needing manual install:** {len(js_needs)}",
+            f"- **Barrel file exports added:** {len(barrel_changed)}",
+            f"- **Python __init__.py imports added:** {len(init_changed)}",
+            f"- **tsconfig.json path aliases added:** {len(tsconfig_added)}",
+            f"- **Playwright stubs generated:** {len(playwright_created)}",
             f"- **Migration scripts:** {len(migrations)}",
             f"- **Verification FAIL:** {len(fails)}  WARN: {len(warns)}",
             "",
@@ -801,20 +1450,73 @@ class IntegrationAgent:
             lines.append("")
 
         if py_added:
-            lines += ["## Python Dependencies Added", ""]
+            lines += ["## Python Dependencies Added to requirements.txt", ""]
             for pkg in py_added:
                 lines.append(f"- `{pkg}`")
             lines.append("")
 
+        if js_pkg_added:
+            lines += ["## JS Packages Written to package.json", ""]
+            lines.append("These packages were added with version `\"*\"`. Run `npm install` to fetch them.")
+            lines.append("")
+            for pkg in js_pkg_added:
+                lines.append(f"- `{pkg}`")
+            lines.append("")
+
         if js_needs:
-            lines += ["## JS Packages Needing Install", ""]
+            lines += ["## JS Packages Needing Manual Install", ""]
             lines.append(f"Run: `npm install {' '.join(js_needs)}`")
+            lines.append("")
+            lines.append("Or set `integration.update_package_json: true` to write these to package.json automatically.")
+            lines.append("")
+
+        if barrel_changed:
+            lines += ["## Barrel File (index.ts) Updates", ""]
+            for u in barrel_changed:
+                action = "Created" if u.get("status") == "created" else "Appended to"
+                lines.append(f"- {action} `{u.get('barrel', '?')}`: `{u.get('module', '?')}`")
+            lines.append("")
+
+        if init_changed:
+            lines += ["## Python __init__.py Updates", ""]
+            for u in init_changed:
+                action = "Created" if u.get("status") == "created" else "Appended to"
+                lines.append(f"- {action} `{u.get('init', '?')}`: `from . import {u.get('module', '?')}`")
+            lines.append("")
+
+        if tsconfig_added:
+            lines += ["## tsconfig.json Path Aliases Added", ""]
+            for u in tsconfig_added:
+                lines.append(f"- `{u.get('alias', '?')}` → `{u.get('path', '?')}`")
+            lines.append("")
+
+        if playwright_created:
+            lines += ["## Playwright Test Stubs Generated", ""]
+            lines.append(
+                "Run `npx playwright test` (or set `verification.tool: playwright`) to execute these stubs."
+            )
+            lines.append("")
+            for s in playwright_created:
+                lines.append(f"- `{s.get('stub', '?')}` (`{s.get('component', '?')}`)")
             lines.append("")
 
         if migrations:
             lines += ["## Migration Scripts", ""]
             for m in migrations:
                 lines.append(f"- `{m.get('script_path', '?')}` (step `{m.get('step_id', '?')}`)")
+            lines.append("")
+
+        if post_cmd:
+            rc = post_cmd.get("returncode")
+            icon = "✓" if rc == 0 else "✗"
+            lines += [f"## Post-placement Command ({icon} exit {rc})", ""]
+            lines.append(f"```\n{post_cmd.get('command', '')}\n```")
+            if post_cmd.get("stdout"):
+                lines += ["", "**stdout:**", "```", post_cmd["stdout"][:1000], "```"]
+            if post_cmd.get("stderr"):
+                lines += ["", "**stderr:**", "```", post_cmd["stderr"][:1000], "```"]
+            if post_cmd.get("error"):
+                lines += ["", f"**Error:** {post_cmd['error']}"]
             lines.append("")
 
         if findings:

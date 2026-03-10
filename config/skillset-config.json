@@ -162,6 +162,15 @@
       "notes": "NgModule declarations become component files in a feature folder, providers become service modules, imports become type imports",
       "example_source": "ActionHistory.module.ts",
       "example_target": "src/components/application/ folder"
+    },
+    {
+      "id": "MAP-007",
+      "source_pattern": "React functional component (with hooks, MUI, react-router)",
+      "target_pattern": "Next.js React functional component with CSS Modules",
+      "template": "templates/react-to-nextjs.jinja2",
+      "notes": "Replace MUI sx props with CSS Module classNames, replace react-router hooks with next/navigation equivalents, add 'use client' directive when needed, keep all React hooks and business logic unchanged",
+      "example_source": "ActivityList.tsx",
+      "example_target": "ActivityList.tsx (Next.js with CSS Modules)"
     }
   ],
   "project_structure": {

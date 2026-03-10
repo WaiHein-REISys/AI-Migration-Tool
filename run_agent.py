@@ -230,16 +230,24 @@ def _job_to_args(job: dict, overrides: dict | None = None) -> argparse.Namespace
         # --- Integration (Stage 7) ---
         target_root         = _get(pipeline, "target_root"),
         integration_config  = {
-            "enabled":            _get(job.get("integration", {}), "enabled",            True),
-            "add_dependencies":   _get(job.get("integration", {}), "add_dependencies",   True),
-            "generate_migration": _get(job.get("integration", {}), "generate_migration", True),
+            "enabled":                _get(job.get("integration", {}), "enabled",                True),
+            "add_dependencies":       _get(job.get("integration", {}), "add_dependencies",       True),
+            "generate_migration":     _get(job.get("integration", {}), "generate_migration",     True),
+            "update_package_json":       _get(job.get("integration", {}), "update_package_json",       False),
+            "update_barrel_files":       _get(job.get("integration", {}), "update_barrel_files",       True),
+            "update_python_inits":       _get(job.get("integration", {}), "update_python_inits",       True),
+            "update_tsconfig_paths":     _get(job.get("integration", {}), "update_tsconfig_paths",     False),
+            "post_placement_command":    _get(job.get("integration", {}), "post_placement_command",    None),
+            "post_placement_timeout":    _get(job.get("integration", {}), "post_placement_timeout",    300),
+            "generate_playwright_stubs": _get(job.get("integration", {}), "generate_playwright_stubs", False),
         },
         verification_config = {
-            "enabled":       _get(job.get("verification", {}), "enabled", False),
+            "enabled":       _get(job.get("verification", {}), "enabled",       False),
+            "tool":          _get(job.get("verification", {}), "tool",           "commands"),
             "cwd":           _get(job.get("verification", {}), "cwd"),
-            "commands":      _get(job.get("verification", {}), "commands", []),
-            "env":           _get(job.get("verification", {}), "env", {}),
-            "fail_on_error": _get(job.get("verification", {}), "fail_on_error", True),
+            "commands":      _get(job.get("verification", {}), "commands",       []),
+            "env":           _get(job.get("verification", {}), "env",            {}),
+            "fail_on_error": _get(job.get("verification", {}), "fail_on_error",  True),
         },
 
         # --- UI Consistency Audit (Stage 6b) ---

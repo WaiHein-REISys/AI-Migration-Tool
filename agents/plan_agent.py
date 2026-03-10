@@ -395,6 +395,15 @@ class PlanAgent:
         node_type = node.get("type", "")
 
         mapping_hints = {
+            # React source patterns → MAP-007 (React → Next.js)
+            "React Component":        "MAP-007",
+            "React Component with Hooks": "MAP-007",
+            "React Context":          "MAP-007",
+            "React Custom Hook":      "MAP-007",
+            "React Test":             "MAP-007",
+            "TypeScript Test":        "MAP-007",
+            "TypeScript Custom Hook": "MAP-007",
+            # Angular / ASP.NET patterns → original mappings
             "Angular 2 Component":    "MAP-001",
             "Angular 2 Service":      "MAP-002",
             "Area API Controller":    "MAP-003",
@@ -408,7 +417,11 @@ class PlanAgent:
                 return self.config.get("mappings_index", {}).get(map_id)
 
         if node_type == "frontend":
-            return self.config.get("mappings_index", {}).get("MAP-001")
+            # Default for unknown frontend patterns — use passthrough if MAP-007 unavailable
+            return (
+                self.config.get("mappings_index", {}).get("MAP-007")
+                or self.config.get("mappings_index", {}).get("MAP-001")
+            )
         if node_type == "backend":
             return self.config.get("mappings_index", {}).get("MAP-003")
         if node_type == "database":

@@ -2,8 +2,8 @@
 Scoping & Analysis Agent
 ========================
 Analyses a declared feature boundary folder to produce a dependency graph.
-Works over Angular 2 TypeScript (.ts), ASP.NET Core C# (.cs), and SQL (.sql)
-source files found in HAB-GPRSSubmission.
+Works over TypeScript (.ts / .tsx) — including React components — ASP.NET Core
+C# (.cs), and SQL (.sql) source files.
 
 This agent does NOT write any code. Its sole output is a dependency graph JSON
 that feeds the Plan Document Generation Agent.
@@ -125,13 +125,18 @@ class ScopingAgent:
                 self.feature_root.name,
             )
 
-        ts_files  = [f for f in filtered_files if f.suffix in (".ts",) and not f.name.endswith(".d.ts")]
+        ts_files  = [
+            f for f in filtered_files
+            if f.suffix in (".ts", ".tsx") and not f.name.endswith(".d.ts")
+        ]
         cs_files  = [f for f in filtered_files if f.suffix == ".cs"]
         sql_files = [f for f in filtered_files if f.suffix == ".sql"]
 
+        tsx_count = sum(1 for f in ts_files if f.suffix == ".tsx")
+        ts_count  = len(ts_files) - tsx_count
         logger.info(
-            "Scoping %s — found %d .ts, %d .cs, %d .sql files (after ignore filter).",
-            self.feature_root.name, len(ts_files), len(cs_files), len(sql_files)
+            "Scoping %s — found %d .ts + %d .tsx, %d .cs, %d .sql files (after ignore filter).",
+            self.feature_root.name, ts_count, tsx_count, len(cs_files), len(sql_files)
         )
 
         # Compute a stable hash over the sorted content of all source files so
@@ -252,6 +257,36 @@ class ScopingAgent:
         return exports
 
     def _detect_angular_pattern(self, source: str) -> str:
+        """Detect source framework pattern for both Angular 2 and React source files."""
+        # ── React patterns (checked first) ───────────────────────────────
+        _is_react = (
+            "from 'react'" in source
+            or 'from "react"' in source
+            or "import React" in source
+        )
+        if _is_react or re.search(r"<[A-Z][A-Za-z]+[\s/>]", source):
+            # Test / spec files
+            if re.search(r"\b(?:describe|it|test)\s*\(", source):
+                return "React Test"
+            # Context provider/consumer
+            if "createContext" in source or "useContext" in source:
+                return "React Context"
+            # Custom hook (exported function whose name starts with 'use')
+            if re.search(r"\bexport\s+(?:default\s+)?function\s+use[A-Z]", source):
+                return "React Custom Hook"
+            # Standard React component with hooks
+            if re.search(r"\b(?:useState|useEffect|useCallback|useMemo|useRef)\s*\(", source):
+                return "React Component with Hooks"
+            # Plain React component
+            return "React Component"
+
+        # ── Plain TypeScript utility / test patterns ──────────────────────
+        if re.search(r"\b(?:describe|it|test)\s*\(", source):
+            return "TypeScript Test"
+        if re.search(r"\bexport\s+(?:default\s+)?function\s+use[A-Z]", source):
+            return "TypeScript Custom Hook"
+
+        # ── Angular 2 patterns ────────────────────────────────────────────
         if "@Component" in source and "templateUrl" in source:
             return "Angular 2 Component"
         if "@Injectable" in source and "BaseService" in source:

@@ -277,11 +277,20 @@ def generate_job_template(answers: dict) -> str:
 
         # ── Integration (Stage 7) ──────────────────────────────────────────────────
         # Runs after validation. Places output files into target_root, syncs
-        # dependencies, verifies structural alignment, and generates migration scripts.
+        # dependencies, updates barrel files and __init__.py exports, verifies
+        # structural alignment, generates migration scripts, and optionally runs a
+        # post-placement build command.
         integration:
           enabled: true            # set false to skip Stage 7 entirely
           add_dependencies: true   # auto-add missing Python deps to requirements.txt
           generate_migration: true # generate DB migration script if model changes detected
+          update_package_json: false       # true = write missing JS packages to package.json
+          update_barrel_files: true        # false = skip index.ts export updates
+          update_python_inits: true        # false = skip __init__.py updates
+          update_tsconfig_paths: false     # true = add path aliases to tsconfig.json (opt-in)
+          post_placement_command: null     # e.g. "npm run build" — runs after all files placed
+          post_placement_timeout: 300      # seconds before post_placement_command times out
+          generate_playwright_stubs: false # true = emit tests/e2e/<Component>.spec.ts stubs
 
         # ── UI Consistency Audit (Stage 6b) ───────────────────────────────────────
         # Compares Angular source template against the converted React/TSX output.
@@ -293,8 +302,10 @@ def generate_job_template(answers: dict) -> str:
 
         # ── End-to-End Verification (Stage 8) ───────────────────────────────────
         # Runs command-based checks (build/test/lint) after integration.
+        # Set tool: playwright to auto-detect playwright.config.ts and run tests.
         verification:
           enabled: false
+          tool: commands           # commands (default) | playwright
           cwd: null                # null => target_root when set, else output_root
           commands: []             # e.g. ["npm ci", "npm test", "pytest -q"]
           env: {{}}

@@ -1,0 +1,73 @@
+{#
+  Template: react-to-nextjs.jinja2
+  Mapping:  MAP-007
+  Source:   React functional component (with or without hooks, MUI, react-router)
+  Target:   Next.js React functional component (.tsx) with CSS Modules
+
+  This template provides a structural scaffold. The LLM fills in the
+  actual business logic by translating the source_code with minimal changes.
+
+  Key translation rules:
+    MUI <Box sx={{...}}>     → plain <div> / <section> with CSS Module className
+    MUI <Typography>         → plain <h1>/<p>/<span> with CSS Module className
+    MUI <Button>             → plain <button> with CSS Module className
+    MUI <TextField>          → plain <input> or <textarea> with CSS Module className
+    MUI sx prop styles       → extract to ComponentName.module.css (camelCase class names)
+    react-router useNavigate → useRouter() from next/navigation
+    react-router useParams   → useParams() from next/navigation
+    react-router Link        → Link from next/link
+    React.FC<Props> type     → keep as-is (functional component with typed props)
+    useState / useEffect     → keep as-is (no translation needed)
+    useRef / useMemo         → keep as-is (no translation needed)
+    useCallback              → keep as-is (no translation needed)
+    Context (useContext)     → keep as-is or migrate to contexts/ folder
+    'use client' directive   → add at top if component uses hooks / browser APIs
+
+  CSS Modules rules:
+    - Create a companion ComponentName.module.css file for extracted styles
+    - Import as: import styles from './ComponentName.module.css'
+    - Reference as: className={styles.myClass}
+    - Use camelCase class names in the CSS module (e.g. .activityList, .cardContainer)
+    - Do NOT use inline sx props in the output — all styles go in the CSS module
+
+  IMPORTANT — preserve component logic:
+    - Do NOT remove any business logic, event handlers, or data fetching
+    - Keep all props, state variables, and callbacks intact
+    - Only replace the styling mechanism (MUI sx → CSS Modules)
+    - Keep all type annotations and interfaces
+#}
+"use client";
+
+{# ---- Imports block (LLM fills exact imports from source analysis) ---- #}
+import { useState, useEffect, useCallback, useRef } from "react";
+{# TODO: Add next/navigation imports if source uses react-router (useRouter, useParams, Link) #}
+{# TODO: Add feature-specific service imports #}
+{# TODO: Import CSS module: import styles from './{{ step.target_file | replace('.tsx','') }}.module.css' #}
+
+{# ---- Props interface (LLM derives from source Props type / interface) ---- #}
+{# TODO: LLM copies or adapts the Props type from the source file here #}
+
+{# ---- Component definition ---- #}
+{# Source component: {{ step.source_file }} #}
+export default function {{ step.target_file | replace('.tsx','') | replace('/', '') }}(
+  {# TODO: LLM fills in typed props from source #}
+) {
+  {# ---- State (translated from source useState calls — keep as-is) ---- #}
+  {# TODO: LLM copies all useState / useRef declarations from source #}
+
+  {# ---- Effects (keep as-is — no translation needed for React → Next.js) ---- #}
+  {# TODO: LLM copies all useEffect / useCallback blocks from source #}
+
+  {# ---- Event handlers (keep as-is from source) ---- #}
+  {# TODO: LLM copies all handler functions from source #}
+
+  return (
+    <>
+      {/* TODO: LLM translates JSX from source:
+               - Replace MUI components with plain HTML elements
+               - Replace sx={{...}} with className={styles.xxx}
+               - Keep all logic (map, conditional rendering, event handlers)
+               - Keep all data bindings and prop passing unchanged */}
+    </>
+  );
+}

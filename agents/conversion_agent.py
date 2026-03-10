@@ -511,35 +511,43 @@ class ConversionAgent:
         """
         Post-process LLM output to extract clean source code.
 
-        Two passes are applied in order:
+        Three passes are applied in order:
 
         Pass 1 — Markdown code fence extraction:
           If the output is wrapped in a markdown code fence (```python...```),
           extract the inner code.  Handles:
-            - Preamble prose before the first fence ("Here is the code:\n```...")
-            - ```python / ```ts / ``` variants
+            - Preamble prose before the first fence ("Here is the code:\\n```...")
+            - ```python / ```ts / ```typescript / ``` variants
             - Trailing text after the closing fence (ignored)
 
         Pass 2 — Leading prose stripping:
-          Some LLMs (e.g. codex exec) emit chain-of-thought reasoning as plain
-          text lines BEFORE the first import/from/#.  These prose lines make the
-          file invalid Python.  This pass finds the first line that looks like
-          valid Python and discards everything above it.
+          Some LLMs emit chain-of-thought reasoning as plain text lines BEFORE
+          the first code line.  This pass finds the first line that looks like
+          valid Python or TypeScript/JavaScript and discards everything above it.
 
           A line is treated as the start of code when it begins with:
-            import / from / # / \"\"\" / ''' / def / class / @
+            Python:      import / from / # / \"\"\" / ''' / def / class / @
+            TS/JS:       // / /* / /** / export / const / let / var / type /
+                         interface / function / async / import (already listed)
 
-        If neither pass changes the text, the original is returned unchanged.
+        Pass 3 — Trailing prose stripping:
+          LLMs sometimes append an explanation section after the code, separated
+          by a markdown rule ("---") or lines like "Key changes:", "Notes:",
+          "Changes made:", etc.  Everything from the first such separator onward
+          is removed.
+
+        If no pass changes the text, the original is returned unchanged.
         """
         # Pass 1: extract from markdown code fences
         match = re.search(r"```[^\n]*\n(.*?)```", text, re.DOTALL)
         if match:
             extracted = match.group(1).strip()
             if extracted:
-                text = extracted  # continue to pass 2 in case fenced block also has prose
+                text = extracted  # continue to pass 2/3
 
         # Pass 2: strip leading prose before the first code line
         _CODE_STARTERS = (
+            # Python
             "import ",
             "from ",
             "#",
@@ -548,14 +556,38 @@ class ConversionAgent:
             "def ",
             "class ",
             "@",
+            # TypeScript / JavaScript
+            "//",
+            "/*",
+            "export ",
+            "const ",
+            "let ",
+            "var ",
+            "type ",
+            "interface ",
+            "function ",
+            "async ",
         )
         lines = text.splitlines()
         for i, line in enumerate(lines):
             stripped = line.strip()
             if any(stripped.startswith(s) for s in _CODE_STARTERS):
                 if i > 0:
-                    return "\n".join(lines[i:])
+                    text = "\n".join(lines[i:])
                 break  # already starts at a code line — no change needed
+
+        # Pass 3: strip trailing explanation prose after code
+        # Matches "---" horizontal rule, or lines starting with common changelog
+        # section headers that LLMs append after the generated code.
+        _TRAILING_SEPARATOR = re.compile(
+            r"\n(?:---+|===+|\*\*\*+)"          # markdown hr variants
+            r"|(?:\n(?:Key changes|Notes|Note|Changes made|Changes|Summary|Explanation"
+            r"|What changed|Rationale|Changelog):)",
+            re.IGNORECASE,
+        )
+        trailer = _TRAILING_SEPARATOR.search(text)
+        if trailer:
+            text = text[:trailer.start()].rstrip()
 
         return text
 

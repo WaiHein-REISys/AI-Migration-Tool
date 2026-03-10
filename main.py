@@ -509,7 +509,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         run_id=run_id,
         logs_dir=DEFAULT_LOGS_DIR,
         config=config,
-        llm_router=None,
+        llm_router=llm_router,
         integration_config=getattr(args, "integration_config", {}),
         dry_run=args.dry_run,
     )
@@ -556,10 +556,11 @@ def run_pipeline(args: argparse.Namespace) -> int:
         print(f"  Integration:  {integration['status']} ({_placed} file(s) placed)")
         if integration.get("report_json"):
             print(f"  IntegrationR: {integration['report_json']}")
-    if verification.get("status") not in {"skipped_disabled", "skipped_no_commands"}:
-        print(f"  E2E Verify:   {verification.get('status')}")
-        if verification.get("report_json"):
-            print(f"  E2EReport:    {verification['report_json']}")
+    print(f"  E2E Verify:   {verification.get('status', 'unknown')}")
+    if verification.get("report_json"):
+        print(f"  E2EReport:    {verification['report_json']}")
+    if verification.get("report_md"):
+        print(f"  E2EReport MD: {verification['report_md']}")
     print(f"  Output:       {approved_plan['output_root']}")
     print(f"  Log (JSON):   {log_path}")
     print(f"  Log (MD):     {md_log_path}")
@@ -1329,10 +1330,11 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         print(f"  Integration:  {integration['status']} ({_placed} file(s) placed)")
         if integration.get("report_json"):
             print(f"  IntegrationR: {integration['report_json']}")
-    if verification.get("status") not in {"skipped_disabled", "skipped_no_commands"}:
-        print(f"  E2E Verify:   {verification.get('status')}")
-        if verification.get("report_json"):
-            print(f"  E2EReport:    {verification['report_json']}")
+    print(f"  E2E Verify:   {verification.get('status', 'unknown')}")
+    if verification.get("report_json"):
+        print(f"  E2EReport:    {verification['report_json']}")
+    if verification.get("report_md"):
+        print(f"  E2EReport MD: {verification['report_md']}")
     print(f"  Output:       {approved_plan['output_root']}")
     print(f"  Log (JSON):   {log_path}")
     print(f"  Log (MD):     {md_log_path}")
