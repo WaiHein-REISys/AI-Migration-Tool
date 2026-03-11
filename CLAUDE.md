@@ -9,6 +9,29 @@
 
 ---
 
+## Domain knowledge — load on demand
+
+To reduce context bloat, deep-dive docs are **not loaded automatically**.
+Reference the relevant file(s) at the start of a session when needed:
+
+| Topic | File |
+|---|---|
+| Pipeline stages 1-8 (what each does, inputs/outputs) | `@docs/Pipeline-Stages.md` |
+| Architecture overview (agents, graph, log format) | `@docs/Architecture.md` |
+| Job file format & all YAML keys | `@docs/Job-Files-Reference.md` |
+| Setup wizard & adding a new target | `@docs/Setup-Wizard.md` |
+| Target stacks & skillset-config | `@docs/Target-Stacks.md` |
+| Guardrail rules (RULE-XXX reference) | `@docs/Guardrail-Rules.md` |
+| LLM provider configuration | `@docs/LLM-Providers.md` |
+| Extending the tool (new stages, hooks) | `@docs/Extending-the-Tool.md` |
+| Troubleshooting common failures | `@docs/Troubleshooting.md` |
+| Pattern library & knowledge extraction | `@docs/Architecture.md` (memory section) |
+
+**Usage:** Paste the `@docs/...` path into your first message when starting a
+session focused on that area. Claude Code will inline the file automatically.
+
+---
+
 ## Working directory
 
 **Always make code changes directly in the repository root:**
