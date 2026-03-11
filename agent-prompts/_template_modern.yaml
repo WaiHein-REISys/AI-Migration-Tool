@@ -86,6 +86,25 @@ verification:
   env: {}
   fail_on_error: true
 
+# ── Project structure (output file path templates) ────────────────────────
+# Optional. When set, values here take precedence over the corresponding
+# entries in config/skillset-config.json for the selected target.
+# Omit any key to fall back to the config default for that key.
+# Use {feature_name} as a placeholder for the lower-cased feature name.
+#
+# Uncomment and edit the sections you want to override:
+#
+# project_structure:
+#   frontend:
+#     components_root: "frontend/app/components/{feature_name}/"
+#     services_root:   "frontend/app/services/"
+#   backend:
+#     api_root:              "backend/routes/"
+#     services_root:         "backend/services/"
+#     repositories_root:     "backend/repositories/"
+#   database:
+#     init_script: "database/init_db.py"
+
 llm:
   # null = auto-detect from environment variables
   provider: null   # anthropic | openai | openai_compat | ollama | llamacpp

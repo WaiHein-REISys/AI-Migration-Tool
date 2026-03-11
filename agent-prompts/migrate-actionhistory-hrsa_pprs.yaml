@@ -21,6 +21,62 @@ pipeline:
   auto_approve: false
   force: false
 
+  # OPTIONAL — absolute path to the target codebase root.
+  # Used by Stage 7 (Integration) to place converted files into the target repo.
+  # Auto-populated from config/wizard-registry.json when registered via the setup wizard.
+  # Set explicitly here to override, or leave null to rely on auto-population.
+  target_root: null
+
+# ── Integration (Stage 7) ──────────────────────────────────────────────────
+integration:
+  enabled: true            # set false to skip Stage 7 entirely
+  add_dependencies: true   # auto-add missing Python deps to requirements.txt
+  generate_migration: true # generate DB migration script if model changes detected
+  update_package_json: true        # true = write missing JS packages to package.json
+  update_barrel_files: true        # false = skip index.ts export updates
+  update_python_inits: true        # false = skip __init__.py updates
+  update_tsconfig_paths: true      # true = add path aliases to tsconfig.json (opt-in)
+  post_placement_command: null     # e.g. "npm run build" — runs after all files placed
+  post_placement_timeout: 300      # seconds before post_placement_command times out
+  generate_playwright_stubs: false # true = emit tests/e2e/<Component>.spec.ts stubs
+
+# ── UI Consistency Audit (Stage 6b) ───────────────────────────────────────
+ui_consistency:
+  enabled: true
+  generate_stories: false
+  fail_on_missing_classes: true
+
+# Stage 8: command-based end-to-end verification (build/test/lint)
+# Commands are auto-detected from the target codebase (package.json / pyproject.toml /
+# Makefile) and verification.enabled is flipped to true automatically when found.
+# Override by setting commands and enabled explicitly below.
+verification:
+  enabled: false           # auto-set to true when commands are auto-detected
+  tool: commands           # commands (default) | playwright
+  cwd: null                # null => target_root (auto-resolved); set explicitly to override
+  commands: []             # leave empty for auto-detection, or specify explicitly
+  env: {}
+  fail_on_error: true
+
+# ── Project structure (output file path templates) ────────────────────────
+# Optional. When set, values here take precedence over the corresponding
+# entries in config/skillset-config.json for the selected target.
+# Omit any key to fall back to the config default for that key.
+# Use {feature_name} as a placeholder for the lower-cased feature name.
+#
+# Uncomment and edit the sections you want to override:
+#
+# project_structure:
+#   frontend:
+#     components_root: "frontend/app/components/{feature_name}/"
+#     services_root:   "frontend/app/services/"
+#   backend:
+#     api_root:              "backend/routes/"
+#     services_root:         "backend/services/"
+#     repositories_root:     "backend/repositories/"
+#   database:
+#     init_script: "database/init_db.py"
+
 llm:
   provider: null
   model: null
@@ -30,6 +86,17 @@ llm:
   ollama_host: null
   max_tokens: null
   temperature: null
+
+# ── Orchestration ──────────────────────────────────────────────────────────
+# enabled: true  = LLM-driven orchestrator (dynamic workflow + auto-retry)
+# enabled: false = fixed sequential pipeline (default, backwards-compatible)
+orchestration:
+  enabled: false           # true = LLM orchestrator; false = sequential pipeline
+  learning: true           # always extract patterns + preferences after each run
+  max_plan_revisions: 2    # max auto-revisions the orchestrator can trigger
+  escalate_on_fail: true   # ask human if orchestrator cannot resolve ambiguity
+  backend: internal        # internal | google_adk
+  tool_use: auto           # auto | always | never  (auto = use native tool-use if provider supports it)
 
 notes: |
   Same ActionHistory feature, but the target stack is HRSA-Simpler-PPRS.

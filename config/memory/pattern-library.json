@@ -2,12 +2,62 @@
   "version": "1.0",
   "patterns": [
     {
-      "fingerprint": "6b9a12302631",
-      "source_signature": "ActionHistory.component",
-      "target_signature": ".tsx",
-      "source_imports": [],
+      "fingerprint": "1ba01542a1e7",
+      "source_signature": "Angular 2 Component [@angular/core, @angular/router, pfm-layout/master]",
+      "target_signature": "Next.js Component .tsx",
+      "source_imports": [
+        "@angular/core",
+        "@angular/router",
+        "pfm-layout/master",
+        "pfm-ng/core",
+        "rxjs/Subject",
+        "./ActionHistory.PageActionModel",
+        "./../core/constants",
+        "./../core/services/context.service",
+        "./../core/services/configuration.service"
+      ],
       "source_hooks": [],
-      "feature_name": "unknown",
+      "feature_name": "ActionHistory",
+      "confidence": 0.85,
+      "run_count": 1
+    },
+    {
+      "fingerprint": "51aaeeafc847",
+      "source_signature": "React Component [react, @mui/material]",
+      "target_signature": "Next.js Component .tsx",
+      "source_imports": [
+        "react",
+        "@mui/material"
+      ],
+      "source_hooks": [],
+      "feature_name": "activities",
+      "confidence": 0.85,
+      "run_count": 1
+    },
+    {
+      "fingerprint": "b8864dd5cf87",
+      "source_signature": "React Test [vitest, @testing-library/react, @testing-library/user-event]",
+      "target_signature": "Next.js Component .tsx",
+      "source_imports": [
+        "vitest",
+        "@testing-library/react",
+        "@testing-library/user-event",
+        "../ActivityForm"
+      ],
+      "source_hooks": [],
+      "feature_name": "activities",
+      "confidence": 0.85,
+      "run_count": 1
+    },
+    {
+      "fingerprint": "f8c823ce9fd7",
+      "source_signature": "React Component [@mui/material]",
+      "target_signature": "Next.js Component .tsx",
+      "source_imports": [
+        "@mui/material"
+      ],
+      "source_hooks": [],
+      "feature_name": "activities",
       "confidence": 0.85,
       "run_count": 1
     }

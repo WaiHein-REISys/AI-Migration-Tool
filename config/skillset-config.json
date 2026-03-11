@@ -363,8 +363,8 @@
   },
   "project_structure_hrsa_simpler_pprs_repo": {
     "frontend": {
-      "components_root": "frontend/src/components/{feature_name}/",
-      "services_root": "frontend/src/services/",
+      "components_root": "frontend/app/components/{feature_name}/",
+      "services_root": "frontend/app/services/",
       "test_suffix": ".test.tsx",
       "styling": "CSS modules",
       "barrel_export": "index.ts where useful",

@@ -266,6 +266,17 @@ def _job_to_args(job: dict, overrides: dict | None = None) -> argparse.Namespace
             "backend":            _get(job.get("orchestration", {}), "backend",             "internal"),
             "tool_use":           _get(job.get("orchestration", {}), "tool_use",            "auto"),
         },
+
+        # --- Project structure path overrides (optional) ---
+        # When set, these templates take precedence over config/skillset-config.json
+        # for the selected target.  Omit to use the config defaults entirely.
+        # Example YAML:
+        #   project_structure:
+        #     frontend:
+        #       components_root: "frontend/app/components/{feature_name}/"
+        #     backend:
+        #       api_root: "backend/routes/"
+        project_structure = job.get("project_structure") or None,
     )
 
     # Default feature_name from feature_root stem if not set

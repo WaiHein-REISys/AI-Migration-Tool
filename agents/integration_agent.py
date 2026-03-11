@@ -441,37 +441,108 @@ class IntegrationAgent:
         """
         Map an output-relative path to a target_root-relative destination.
 
-        Tries ``project_structure`` templates first; falls back to mirroring
-        the output directory structure verbatim.
+        Three phases:
+
+        1. **Exact match** — ``target_rel`` already starts with the config
+           template prefix (e.g. plan was generated with the correct target
+           structure).  Place the file verbatim under ``target_root``.
+
+        2. **Anchor translation** — handles mismatches between the path the
+           plan generated and the actual target layout (e.g. the plan used
+           ``frontend/src/components/`` but the target uses
+           ``frontend/app/components/``).
+
+           For each config template, the structural "anchor" is derived by
+           expanding the template with an empty ``feature_name``, giving the
+           directory prefix without the feature subfolder (e.g.
+           ``"frontend/app/components/"``).  The algorithm finds the deepest
+           contiguous suffix of the anchor's directory segments inside
+           ``target_rel``, then rebases the remainder of the path under the
+           config-declared destination prefix.  If the suffix starts with the
+           ``feature_name`` directory it is stripped to avoid double-nesting.
+
+        3. **Fallback** — mirror the output directory structure verbatim under
+           ``target_root``.  Used when no config template matches (e.g. file
+           types outside the configured structure).
         """
         target_rel = file_entry["target_rel"]
         feature_name = self._feature_name
 
-        # Try project_structure config
-        struct_key = (
-            f"project_structure_{self._target_id}"
-            if f"project_structure_{self._target_id}" in self.config
-            else "project_structure"
-        )
-        struct = self.config.get(struct_key, {})
+        # YAML-first: use the pre-resolved project_structure stored in the
+        # approved plan (merged from YAML overrides + config defaults by
+        # _resolve_project_structure in main.py).  Fall back to reading the
+        # config directly only if the plan did not include a resolved struct
+        # (e.g. when IntegrationAgent is invoked standalone in tests).
+        plan_struct = self.plan.get("project_structure")
+        if plan_struct:
+            struct = plan_struct
+        else:
+            struct_key = (
+                f"project_structure_{self._target_id}"
+                if f"project_structure_{self._target_id}" in self.config
+                else "project_structure"
+            )
+            struct = self.config.get(struct_key, {})
 
-        # Walk frontend/backend sub-dicts for a matching root template
+        # best_match: (anchor_depth, translated_rel)
+        # Higher anchor_depth → more specific match wins.
+        best_match: "tuple[int, str] | None" = None
+
         for section in struct.values():
             if not isinstance(section, dict):
                 continue
             for template in section.values():
                 if not isinstance(template, str):
                     continue
-                # Expand {feature_name}
+
+                # ── Phase 1: exact prefix match ──────────────────────────
                 try:
-                    prefix = template.format(feature_name=feature_name)
+                    dest_prefix = template.format(feature_name=feature_name)
                 except (KeyError, ValueError):
                     continue
-                # If the target_rel already starts with this prefix, use as-is
-                if target_rel.startswith(prefix):
+                if target_rel.startswith(dest_prefix):
                     return self.target_root / target_rel
 
-        # Fallback: mirror output structure
+                # ── Phase 2: anchor-based translation ────────────────────
+                # Build structural anchor: expand template with empty
+                # feature_name to get the base directory without the feature
+                # subfolder (e.g. "frontend/app/components/{fn}/" → parts
+                # ["frontend", "app", "components"]).
+                try:
+                    anchor_str = template.format(feature_name="")
+                except (KeyError, ValueError):
+                    continue
+                dest_parts = [
+                    p for p in anchor_str.replace("\\", "/").split("/") if p
+                ]
+                if not dest_parts:
+                    continue
+
+                target_parts = [
+                    p for p in target_rel.replace("\\", "/").split("/") if p
+                ]
+
+                # Try progressively shorter suffixes of dest_parts as
+                # anchors (deepest first → most specific wins).
+                for depth in range(len(dest_parts), 0, -1):
+                    anchor = dest_parts[-depth:]
+                    for i in range(len(target_parts) - depth + 1):
+                        if target_parts[i : i + depth] == anchor:
+                            # Anchor found; everything after is the suffix.
+                            suffix = target_parts[i + depth :]
+                            # Strip leading feature_name dir to avoid
+                            # double-nesting (e.g. Activity/form/ → form/).
+                            if suffix and suffix[0] == feature_name:
+                                suffix = suffix[1:]
+                            translated = "/".join(dest_parts + suffix)
+                            if best_match is None or depth > best_match[0]:
+                                best_match = (depth, translated)
+                            break  # stop scanning positions for this depth
+
+        if best_match is not None:
+            return self.target_root / best_match[1]
+
+        # ── Phase 3: fallback — mirror output structure verbatim ─────────
         return self.target_root / target_rel
 
     # ------------------------------------------------------------------

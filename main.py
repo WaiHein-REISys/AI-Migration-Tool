@@ -430,6 +430,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         feature_root=args.feature_root,
         output_root=args.output_root or str(DEFAULT_OUTPUT_DIR / args.feature_name),
         target=target_local,
+        project_structure_override=getattr(args, "project_structure", None),
     )
 
     log_path = DEFAULT_LOGS_DIR / f"{run_id}-conversion-log.json"
@@ -617,6 +618,39 @@ def run_pipeline(args: argparse.Namespace) -> int:
 # Build approved plan dict from dependency graph
 # ---------------------------------------------------------------------------
 
+def _resolve_project_structure(
+    skillset: dict,
+    structure_key: str,
+    override: dict | None = None,
+) -> dict:
+    """
+    Return the resolved project-structure dict for path derivation.
+
+    Resolution order (highest priority first):
+    1. Keys explicitly set in the YAML ``project_structure:`` block
+       (passed as *override*).
+    2. Corresponding key in ``config/skillset-config.json`` for the
+       selected target (``project_structure_<target>`` or fallback).
+    3. Hardcoded defaults inside ``_derive_target_path()`` (last resort).
+
+    Merging is per-section, per-key: only keys present in *override*
+    replace the config value; absent keys fall through to the config.
+    """
+    base = skillset.get(structure_key, skillset.get("project_structure", {}))
+    if not override:
+        return base
+    merged: dict = {}
+    all_sections = set(base.keys()) | set(override.keys())
+    for section in all_sections:
+        base_sec     = base.get(section, {})
+        override_sec = override.get(section, {})
+        if isinstance(base_sec, dict) or isinstance(override_sec, dict):
+            merged[section] = {**base_sec, **override_sec}
+        else:
+            merged[section] = override_sec if section in override else base_sec
+    return merged
+
+
 def _build_approved_plan(
     dependency_graph: dict,
     config: dict,
@@ -624,6 +658,7 @@ def _build_approved_plan(
     feature_root: str,
     output_root: str,
     target: str = "simpler_grants",
+    project_structure_override: dict | None = None,
 ) -> dict:
     """
     Build the structured plan dict that ConversionAgent consumes.
@@ -633,9 +668,13 @@ def _build_approved_plan(
     Parameters
     ----------
     target : str
-        Which target stack to use for output path derivation.
-        'simpler_grants' uses the 'project_structure' key in skillset config;
-        'hrsa_pprs' uses the 'project_structure_hrsa_pprs' key.
+        Target stack identifier.  Selects the ``project_structure_<target>``
+        key in the skillset config (or the generic ``project_structure``
+        fallback) to determine output file path templates.
+    project_structure_override : dict | None
+        Per-section path template overrides sourced from the YAML job file
+        ``project_structure:`` block.  Takes precedence over the config
+        defaults on a key-by-key basis.  ``None`` means "use config only".
     """
     steps = []
     phase_labels  = {"frontend": "C", "backend": "B", "database": "A"}
@@ -644,8 +683,24 @@ def _build_approved_plan(
     skillset       = config["skillset"]
     mappings_index = config.get("mappings_index", {})
 
-    # Select the correct project_structure block based on target
-    structure_key = "project_structure_hrsa_pprs" if target == "hrsa_pprs" else "project_structure"
+    # Select the base project_structure block from config.
+    # Prefer "project_structure_<target>" when that key exists;
+    # fall back through known aliases then to the generic key.
+    _target_struct_key = f"project_structure_{target}"
+    if _target_struct_key in skillset:
+        structure_key = _target_struct_key
+    elif target == "hrsa_pprs" or "hrsa_pprs" in target:
+        structure_key = "project_structure_hrsa_pprs"
+    else:
+        structure_key = "project_structure"
+
+    # Merge YAML override on top of config defaults.
+    # The resolved struct is passed to every _derive_target_path() call
+    # AND stored in the plan so IntegrationAgent can use it without
+    # re-reading config.
+    target_struct = _resolve_project_structure(
+        skillset, structure_key, project_structure_override
+    )
 
     for node in dependency_graph.get("nodes", []):
         node_type = node.get("type", "frontend")
@@ -658,9 +713,9 @@ def _build_approved_plan(
         mapping_id = _infer_mapping_id(pattern, node_type)
         mapping    = mappings_index.get(mapping_id, {})
 
-        # Determine target file path
+        # Determine target file path using the resolved struct
         source_rel = node["id"]
-        target_rel = _derive_target_path(node, mapping, skillset, structure_key=structure_key)
+        target_rel = _derive_target_path(node, mapping, target_struct)
 
         # Determine applicable rules
         rule_ids = ["RULE-003"]
@@ -672,13 +727,22 @@ def _build_approved_plan(
             rule_ids.append("RULE-009")
 
         steps.append({
-            "id":           step_id,
-            "description":  f"Convert {source_rel} -> {target_rel}",
-            "source_file":  source_rel,
-            "target_file":  target_rel,
-            "mapping_id":   mapping_id,
-            "rule_ids":     rule_ids,
-            "rationale":    mapping.get("notes", "Direct translation per RULE-003."),
+            "id":             step_id,
+            "description":    f"Convert {source_rel} -> {target_rel}",
+            "source_file":    source_rel,
+            "target_file":    target_rel,
+            "mapping_id":     mapping_id,
+            "rule_ids":       rule_ids,
+            "rationale":      mapping.get("notes", "Direct translation per RULE-003."),
+            # ── Knowledge-extraction metadata ──────────────────────────────
+            # Propagated from the dependency graph node so KnowledgeExtractor
+            # can build rich pattern-library entries (Jaccard on imports).
+            "source_imports":  node.get("imports", []),
+            "source_hooks":    node.get("hooks", []),
+            "file_type":       node.get("pattern", ""),   # e.g. "React Component"
+            "component_type":  node_type,                  # "frontend"|"backend"|"database"
+            "source_lang":     node.get("lang", ""),       # "TypeScript"|"Python"
+            "feature_name":    dependency_graph["feature_name"],
         })
 
     # Sort: database (A) -> backend (B) -> frontend (C)
@@ -689,6 +753,8 @@ def _build_approved_plan(
         "feature_root":     feature_root,
         "output_root":      output_root,
         "run_id":           run_id,
+        "target":           target,           # propagated to IntegrationAgent._target_id
+        "project_structure": target_struct,   # resolved struct for IntegrationAgent placement
         "conversion_steps": steps,
     }
 
@@ -713,18 +779,19 @@ def _infer_mapping_id(pattern: str, node_type: str) -> str:
 def _derive_target_path(
     node: dict,
     mapping: dict,
-    skillset: dict,
-    structure_key: str = "project_structure",
+    target_struct: dict,
 ) -> str:
     """
-    Derive the target file path from the source node and skillset config.
+    Derive the target file path from the source node and a pre-resolved
+    project-structure dict.
 
     Parameters
     ----------
-    structure_key : str
-        Which key in the skillset dict to use for project structure paths.
-        'project_structure' for simpler-grants-gov,
-        'project_structure_hrsa_pprs' for HRSA-Simpler-PPRS.
+    target_struct : dict
+        Already-resolved project structure dict (keyed by section, e.g.
+        ``{"frontend": {...}, "backend": {...}}``).  Produced by
+        :func:`_resolve_project_structure` so YAML overrides are already
+        merged in; no further config lookup is needed here.
     """
     node_type = node.get("type", "frontend")
     exports   = node.get("exports", [])
@@ -734,7 +801,6 @@ def _derive_target_path(
         s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", s)
         return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
 
-    target_struct = skillset.get(structure_key, skillset.get("project_structure", {}))
     feature_name  = node.get("id", "").split("/")[0].lower()
 
     if node_type == "frontend":
@@ -1199,6 +1265,7 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
         feature_root=args.feature_root,
         output_root=args.output_root or str(DEFAULT_OUTPUT_DIR / args.feature_name),
         target=target,
+        project_structure_override=getattr(args, "project_structure", None),
     )
 
     log_path = DEFAULT_LOGS_DIR / f"{run_id}-conversion-log.json"

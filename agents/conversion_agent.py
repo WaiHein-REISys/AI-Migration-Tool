@@ -306,6 +306,18 @@ class ConversionAgent:
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_text(converted_code, encoding="utf-8")
 
+        # Collect knowledge-extraction metadata from the step dict so
+        # KnowledgeExtractor can build rich pattern-library entries later.
+        # Fields are only set when non-empty to keep log entries compact.
+        _kx_meta: dict = {}
+        for _kx_key in (
+            "source_imports", "source_hooks",
+            "file_type", "component_type", "source_lang", "feature_name",
+        ):
+            _val = step.get(_kx_key)
+            if _val:
+                _kx_meta[_kx_key] = _val
+
         self.log.record(
             "wrote_file",
             source_file=source_rel,
@@ -314,6 +326,7 @@ class ConversionAgent:
             transformation=f"Converted {source_rel} -> {target_rel} using {template_name}",
             rationale=rationale,
             plan_step_ref=step["id"],
+            extra=_kx_meta or None,
         )
 
         if self.dry_run:

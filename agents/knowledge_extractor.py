@@ -142,6 +142,23 @@ class KnowledgeExtractor:
                 tgt_sig = self._derive_target_signature(step)
 
             if src_sig and tgt_sig:
+                # Quality gate: skip entries that carry no Jaccard-matchable signals.
+                # Pre-fix log entries lack source_imports, source_hooks, and file_type —
+                # they produce signatures that are just filename stems (".tsx" / "Foo")
+                # and can never be meaningfully matched against future features.
+                # Post-fix entries always have at least file_type from _build_approved_plan().
+                _has_signals = bool(
+                    step.get("source_imports")
+                    or step.get("source_hooks")
+                    or step.get("file_type")
+                )
+                if not _has_signals:
+                    logger.debug(
+                        "KnowledgeExtractor: skipping low-quality entry '%s' "
+                        "(no imports, hooks, or file_type) — won't contribute to matching.",
+                        step.get("source_file", "?"),
+                    )
+                    continue
                 enriched.append({**step, "status": status, "source_signature": src_sig, "target_signature": tgt_sig})
 
         if not enriched:
@@ -152,20 +169,46 @@ class KnowledgeExtractor:
 
     @staticmethod
     def _derive_source_signature(step: dict) -> str:
-        """Build a human-readable source signature from step metadata."""
-        parts = []
-        file_type = step.get("file_type", "")
-        component = step.get("component_type", "")
-        hooks      = step.get("source_hooks", [])
-        source_file = step.get("source_file", "")
+        """
+        Build a human-readable source signature from step metadata.
 
+        Priority:
+        1. file_type  (e.g. "React Component", "Angular Service") — most descriptive
+        2. component_type + source_lang  ("frontend TypeScript")
+        3. File name stem as last resort
+
+        Appends top-3 non-relative imports as a hint when available, e.g.:
+            "React Component [react, @mui/material, react-router-dom]"
+        Hooks are appended if present (less common but valuable signal).
+        """
+        parts = []
+        file_type    = step.get("file_type", "")
+        component    = step.get("component_type", "")
+        lang         = step.get("source_lang", "")
+        hooks        = step.get("source_hooks", [])
+        imports      = step.get("source_imports", [])
+        source_file  = step.get("source_file", "")
+
+        # Primary descriptor
         if file_type:
             parts.append(file_type)
-        if component:
-            parts.append(component)
+        elif component:
+            label = component
+            if lang:
+                label = f"{component} ({lang})"
+            parts.append(label)
+
+        # Lifecycle hooks
         if hooks:
             parts.append(f"[{', '.join(hooks[:3])}]")
-        # Fall back to file name stem when richer metadata is absent
+
+        # Top meaningful imports as supplemental signal
+        if imports and not hooks:
+            meaningful = [i for i in imports if not i.startswith(".")][:3]
+            if meaningful:
+                parts.append(f"[{', '.join(meaningful)}]")
+
+        # Last-resort: filename stem
         if not parts and source_file:
             parts.append(Path(source_file).stem)
 
@@ -173,19 +216,42 @@ class KnowledgeExtractor:
 
     @staticmethod
     def _derive_target_signature(step: dict) -> str:
-        """Build a human-readable target signature from step metadata."""
-        parts = []
-        output_file  = step.get("output_file", "") or step.get("target_file", "")
-        target_type  = step.get("target_type", "")
-        target_hooks = step.get("target_hooks", [])
+        """
+        Build a human-readable target signature from step metadata.
 
+        Uses target_type when present; otherwise infers a label from
+        component_type (e.g. "frontend" → "Next.js Component") and appends
+        the file extension from output_file / target_file.
+        """
+        parts = []
+        output_file   = step.get("output_file", "") or step.get("target_file", "")
+        target_type   = step.get("target_type", "")
+        target_hooks  = step.get("target_hooks", [])
+        component_type = step.get("component_type", "")
+
+        # Primary descriptor — explicit target type wins
         if target_type:
             parts.append(target_type)
+        elif component_type:
+            # Infer a readable label from component_type
+            _type_label = {
+                "frontend": "Next.js Component",
+                "backend":  "Flask Route",
+                "database": "SQLAlchemy Model",
+            }.get(component_type, component_type)
+            parts.append(_type_label)
+
+        # File extension as supplemental signal
         if output_file:
-            parts.append(Path(output_file).suffix or "")
+            suffix = Path(output_file).suffix
+            if suffix:
+                parts.append(suffix)
+
+        # Lifecycle hooks
         if target_hooks:
             parts.append(f"[{', '.join(target_hooks[:3])}]")
-        # Fall back to file name stem when richer metadata is absent
+
+        # Last-resort: filename stem
         if not parts and output_file:
             parts.append(Path(output_file).stem)
 

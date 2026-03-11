@@ -235,7 +235,8 @@ class OrchestratorAgent:
             "feature_name":     dependency_graph.get("feature_name", ""),
             "feature_root":     getattr(args, "feature_root", None),
             "output_root":      getattr(args, "output_root", None),
-            "target":           getattr(args, "target", "simpler_grants"),
+            "target":             getattr(args, "target", "simpler_grants"),
+            "project_structure_override": getattr(args, "project_structure", None),
             "target_root":      getattr(args, "target_root", None),
             "mode":             getattr(args, "mode", "full"),
             "dry_run":          getattr(args, "dry_run", False),
@@ -745,10 +746,20 @@ class OrchestratorAgent:
         phase_labels = {"frontend": "C", "backend": "B", "database": "A"}
         phase_counts = {"A": 0, "B": 0, "C": 0}
         skillset     = config["skillset"]
-        structure_key = (
-            "project_structure_hrsa_pprs"
-            if target == "hrsa_pprs"
-            else "project_structure"
+
+        # Select base project_structure key from config — mirrors main.py logic.
+        _target_struct_key = f"project_structure_{target}"
+        if _target_struct_key in skillset:
+            structure_key = _target_struct_key
+        elif target == "hrsa_pprs" or "hrsa_pprs" in target:
+            structure_key = "project_structure_hrsa_pprs"
+        else:
+            structure_key = "project_structure"
+
+        # Merge YAML override on top of config defaults (YAML-first).
+        project_structure_override = state.get("project_structure_override")
+        target_struct = self._resolve_project_structure(
+            skillset, structure_key, project_structure_override
         )
 
         mappings_index = config.get("mappings_index", {})
@@ -764,9 +775,7 @@ class OrchestratorAgent:
             mapping    = mappings_index.get(mapping_id, {})
 
             source_rel = node["id"]
-            target_rel = self._derive_target_path(
-                node, mapping, skillset, structure_key=structure_key
-            )
+            target_rel = self._derive_target_path(node, mapping, target_struct)
 
             rule_ids = ["RULE-003"]
             if node.get("endpoints"):
@@ -793,6 +802,8 @@ class OrchestratorAgent:
             "feature_root":     feature_root,
             "output_root":      output_root,
             "run_id":           run_id,
+            "target":           target,           # propagated to IntegrationAgent._target_id
+            "project_structure": target_struct,   # resolved struct for IntegrationAgent placement
             "conversion_steps": steps,
         }
 
@@ -818,9 +829,42 @@ class OrchestratorAgent:
         }.get(node_type, "MAP-001")
 
     @staticmethod
+    def _resolve_project_structure(
+        skillset: dict,
+        structure_key: str,
+        override: "dict | None" = None,
+    ) -> dict:
+        """
+        Return resolved project-structure dict (mirrors main._resolve_project_structure).
+
+        Resolution order: YAML override keys > config defaults > hardcoded fallbacks.
+        Merging is per-section, per-key so only explicitly set YAML keys win.
+        """
+        base = skillset.get(structure_key, skillset.get("project_structure", {}))
+        if not override:
+            return base
+        merged: dict = {}
+        all_sections = set(base.keys()) | set(override.keys())
+        for section in all_sections:
+            base_sec     = base.get(section, {})
+            override_sec = override.get(section, {})
+            if isinstance(base_sec, dict) or isinstance(override_sec, dict):
+                merged[section] = {**base_sec, **override_sec}
+            else:
+                merged[section] = override_sec if section in override else base_sec
+        return merged
+
+    @staticmethod
     def _derive_target_path(
-        node: dict, mapping: dict, skillset: dict, structure_key: str = "project_structure"
+        node: dict, mapping: dict, target_struct: dict
     ) -> str:
+        """
+        Derive the target file path from a pre-resolved project-structure dict.
+
+        ``target_struct`` must already be the resolved per-section dict
+        (``{"frontend": {...}, "backend": {...}}``), produced by
+        :meth:`_resolve_project_structure` so YAML overrides are merged in.
+        """
         import re
         from pathlib import Path as _Path
 
@@ -832,7 +876,6 @@ class OrchestratorAgent:
             s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", s)
             return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
 
-        target_struct = skillset.get(structure_key, skillset.get("project_structure", {}))
         feature_name  = node.get("id", "").split("/")[0].lower()
 
         if node_type == "frontend":
