@@ -194,6 +194,40 @@ def generate_target_stack_prompt(answers: dict) -> str:
 # Job template generator
 # ---------------------------------------------------------------------------
 
+def _format_project_structure_comment(answers: dict) -> str:
+    """
+    Build the commented-out ``project_structure:`` YAML block for the job
+    template, pre-populated with the actual paths computed from wizard answers.
+
+    All values come from ``build_project_structure_entry(answers)`` — the same
+    data written into ``skillset-config.json`` — so the comment acts as a
+    ready-to-uncomment override reference for users.
+    """
+    struct = build_project_structure_entry(answers)
+
+    lines: list[str] = [
+        "# ── Project structure (output file path templates) ────────────────────────",
+        "# Optional. When set, values here take precedence over the corresponding",
+        "# entries in config/skillset-config.json for the selected target.",
+        "# Omit any key to fall back to the config default for that key.",
+        "# Use {feature_name} as a placeholder for the lower-cased feature name.",
+        "#",
+        "# Uncomment and edit the sections you want to override:",
+        "#",
+        "# project_structure:",
+    ]
+
+    for section, keys in struct.items():
+        if isinstance(keys, dict) and keys:
+            lines.append(f"#   {section}:")
+            for key, value in keys.items():
+                # Align values after a consistent column for readability
+                padding = max(1, 30 - len(key))
+                lines.append(f'#     {key}:{" " * padding}"{value}"')
+
+    return "\n".join(lines)
+
+
 def generate_job_template(answers: dict) -> str:
     """
     Return the YAML content of  agent-prompts/_template_<target_id>.yaml.
@@ -204,6 +238,16 @@ def generate_job_template(answers: dict) -> str:
     source_path = source.get("root", "")
     target_path = target.get("root", "")
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Build the project_structure comment block separately.
+    # It is inserted via a post-dedent str.replace() rather than inside the
+    # f-string, because:
+    #   (a) multi-line f-string interpolation does not indent continuation lines,
+    #       which breaks textwrap.dedent()'s common-indent detection; and
+    #   (b) path values contain literal {feature_name} which would be misread
+    #       as f-string placeholders.
+    _project_structure_block = _format_project_structure_comment(answers)
+    _PS_PLACEHOLDER = "__PROJECT_STRUCTURE_BLOCK__"
 
     # Use clear placeholders when actual paths are not provided so that wizard-
     # generated template files are safe to commit without leaking local paths.
@@ -223,7 +267,7 @@ def generate_job_template(answers: dict) -> str:
                 feature_hint = f"{candidate}<FeatureName>"
                 break
 
-    return textwrap.dedent(f"""\
+    _template = textwrap.dedent(f"""\
         # ============================================================
         # AI Migration Tool -- Job File Template
         # Target: {target['name']} ({target['framework']} / {target['backend_framework']})
@@ -311,6 +355,8 @@ def generate_job_template(answers: dict) -> str:
           env: {{}}
           fail_on_error: true
 
+        __PROJECT_STRUCTURE_BLOCK__
+
         llm:
           # null = auto-detect from environment variables
           provider: null   # anthropic | openai | openai_compat | ollama | llamacpp
@@ -349,6 +395,10 @@ def generate_job_template(answers: dict) -> str:
           - Cross-feature imports that need human review
           - Expected output files
     """)
+
+    # Replace the placeholder with the project_structure comment block now that
+    # textwrap.dedent() has normalised indentation (placeholder sits at col 0).
+    return _template.replace(_PS_PLACEHOLDER, _project_structure_block)
 
 
 def populate_job_template(
