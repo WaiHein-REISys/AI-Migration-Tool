@@ -60,3 +60,7 @@ desktop.ini
 *.env
 secrets.json
 devops_status_update.py
+scripts/com.leohein.devops-status-50312.plist
+scripts/install_devops_status_launch_agent.sh
+scripts/manage_devops_status_agent.sh
+scripts/run_devops_status_update.sh

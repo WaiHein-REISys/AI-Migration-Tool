@@ -69,6 +69,13 @@ from agents.approval_gate import (
     ApprovalRejectedError,
     CheckpointManager,
 )
+from agents.plan_builder import (
+    stable_run_id      as _pb_stable_run_id,
+    build_approved_plan as _pb_build_approved_plan,
+    infer_mapping_id    as _pb_infer_mapping_id,
+    derive_target_path  as _pb_derive_target_path,
+    resolve_project_structure as _pb_resolve_project_structure,
+)
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -212,7 +219,7 @@ def _describe_router(router) -> str:
     try:
         p = router._primary
         return f"{p.config.provider} / {p.config.model}"
-    except Exception:
+    except (AttributeError, TypeError):  # router internals may vary
         return "configured (provider details unavailable)"
 
 # ---------------------------------------------------------------------------
@@ -220,23 +227,8 @@ def _describe_router(router) -> str:
 # ---------------------------------------------------------------------------
 
 def _stable_run_id(feature_name: str, feature_root: str, target: str) -> str:
-    """
-    Derive a deterministic run ID from the (feature_name, feature_root, target) triple.
-
-    Two runs with identical inputs produce the same ID, so all artefacts
-    (checkpoint, dependency graph, plan, conversion log) are written to the
-    same paths and subsequent runs skip re-creating them if nothing has changed.
-
-    Format:  conv-<feature_slug>-<target_abbrev>-<hash8>
-    Example: conv-actionhistory-sg-a1b2c3d4   (simpler_grants)
-             conv-actionhistory-hp-a1b2c3d4   (hrsa_pprs)
-    """
-    slug   = re.sub(r"[^\w]", "-", feature_name.lower())[:20].strip("-")
-    abbrev = {"simpler_grants": "sg", "hrsa_pprs": "hp"}.get(target, target[:4])
-    digest = hashlib.sha1(
-        f"{feature_root}|{target}".encode("utf-8")
-    ).hexdigest()[:8]
-    return f"conv-{slug}-{abbrev}-{digest}"
+    """Delegate to :func:`agents.plan_builder.stable_run_id`."""
+    return _pb_stable_run_id(feature_name, feature_root, target)
 
 
 def _is_run_complete(run_id: str) -> bool:
@@ -256,7 +248,7 @@ def _is_run_complete(run_id: str) -> bool:
             and not state.get("pending_steps")
             and not state.get("blocked_steps")
         )
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
         return False
 
 
@@ -282,8 +274,8 @@ def _resolve_target_root(args: argparse.Namespace, approved_plan: dict):
         tr = reg.get("target_root")
         if tr and tr != "<YOUR_TARGET_ROOT>":
             return Path(tr)
-    except Exception:
-        pass
+    except (ImportError, OSError, KeyError, TypeError):
+        pass  # wizard not installed or registry malformed — continue
     return None
 
 
@@ -623,32 +615,8 @@ def _resolve_project_structure(
     structure_key: str,
     override: dict | None = None,
 ) -> dict:
-    """
-    Return the resolved project-structure dict for path derivation.
-
-    Resolution order (highest priority first):
-    1. Keys explicitly set in the YAML ``project_structure:`` block
-       (passed as *override*).
-    2. Corresponding key in ``config/skillset-config.json`` for the
-       selected target (``project_structure_<target>`` or fallback).
-    3. Hardcoded defaults inside ``_derive_target_path()`` (last resort).
-
-    Merging is per-section, per-key: only keys present in *override*
-    replace the config value; absent keys fall through to the config.
-    """
-    base = skillset.get(structure_key, skillset.get("project_structure", {}))
-    if not override:
-        return base
-    merged: dict = {}
-    all_sections = set(base.keys()) | set(override.keys())
-    for section in all_sections:
-        base_sec     = base.get(section, {})
-        override_sec = override.get(section, {})
-        if isinstance(base_sec, dict) or isinstance(override_sec, dict):
-            merged[section] = {**base_sec, **override_sec}
-        else:
-            merged[section] = override_sec if section in override else base_sec
-    return merged
+    """Delegate to :func:`agents.plan_builder.resolve_project_structure`."""
+    return _pb_resolve_project_structure(skillset, structure_key, override)
 
 
 def _build_approved_plan(
@@ -660,175 +628,26 @@ def _build_approved_plan(
     target: str = "simpler_grants",
     project_structure_override: dict | None = None,
 ) -> dict:
-    """
-    Build the structured plan dict that ConversionAgent consumes.
-    In a full pipeline this comes from the parsed Plan Document.
-    Here we derive it programmatically from the dependency graph.
-
-    Parameters
-    ----------
-    target : str
-        Target stack identifier.  Selects the ``project_structure_<target>``
-        key in the skillset config (or the generic ``project_structure``
-        fallback) to determine output file path templates.
-    project_structure_override : dict | None
-        Per-section path template overrides sourced from the YAML job file
-        ``project_structure:`` block.  Takes precedence over the config
-        defaults on a key-by-key basis.  ``None`` means "use config only".
-    """
-    steps = []
-    phase_labels  = {"frontend": "C", "backend": "B", "database": "A"}
-    phase_counts  = {"A": 0, "B": 0, "C": 0}
-
-    skillset       = config["skillset"]
-    mappings_index = config.get("mappings_index", {})
-
-    # Select the base project_structure block from config.
-    # Prefer "project_structure_<target>" when that key exists;
-    # fall back through known aliases then to the generic key.
-    _target_struct_key = f"project_structure_{target}"
-    if _target_struct_key in skillset:
-        structure_key = _target_struct_key
-    elif target == "hrsa_pprs" or "hrsa_pprs" in target:
-        structure_key = "project_structure_hrsa_pprs"
-    else:
-        structure_key = "project_structure"
-
-    # Merge YAML override on top of config defaults.
-    # The resolved struct is passed to every _derive_target_path() call
-    # AND stored in the plan so IntegrationAgent can use it without
-    # re-reading config.
-    target_struct = _resolve_project_structure(
-        skillset, structure_key, project_structure_override
+    """Delegate to :func:`agents.plan_builder.build_approved_plan`."""
+    return _pb_build_approved_plan(
+        dependency_graph=dependency_graph,
+        config=config,
+        run_id=run_id,
+        feature_root=feature_root,
+        output_root=output_root,
+        target=target,
+        project_structure_override=project_structure_override,
     )
-
-    for node in dependency_graph.get("nodes", []):
-        node_type = node.get("type", "frontend")
-        phase     = phase_labels.get(node_type, "C")
-        phase_counts[phase] += 1
-        step_id = f"Step {phase}{phase_counts[phase]}"
-
-        # Determine mapping
-        pattern    = node.get("pattern", "")
-        mapping_id = _infer_mapping_id(pattern, node_type)
-        mapping    = mappings_index.get(mapping_id, {})
-
-        # Determine target file path using the resolved struct
-        source_rel = node["id"]
-        target_rel = _derive_target_path(node, mapping, target_struct)
-
-        # Determine applicable rules
-        rule_ids = ["RULE-003"]
-        if node.get("endpoints"):
-            rule_ids.insert(0, "RULE-001")
-        if node_type == "frontend":
-            rule_ids.append("RULE-002")
-        if node_type == "database":
-            rule_ids.append("RULE-009")
-
-        steps.append({
-            "id":             step_id,
-            "description":    f"Convert {source_rel} -> {target_rel}",
-            "source_file":    source_rel,
-            "target_file":    target_rel,
-            "mapping_id":     mapping_id,
-            "rule_ids":       rule_ids,
-            "rationale":      mapping.get("notes", "Direct translation per RULE-003."),
-            # ── Knowledge-extraction metadata ──────────────────────────────
-            # Propagated from the dependency graph node so KnowledgeExtractor
-            # can build rich pattern-library entries (Jaccard on imports).
-            # "imports" is set by the TypeScript/Angular scoping path.
-            # "usings"  is set by the C# scoping path (_analyze_csharp_file).
-            # Fall back to "usings" so EF Core / ASP.NET source files get
-            # their namespaces captured in the pattern library.
-            "source_imports":  node.get("imports") or node.get("usings", []),
-            "source_hooks":    node.get("hooks", []),
-            "file_type":       node.get("pattern", ""),   # e.g. "React Component"
-            "component_type":  node_type,                  # "frontend"|"backend"|"database"
-            "source_lang":     node.get("lang", ""),       # "TypeScript"|"Python"
-            "feature_name":    dependency_graph["feature_name"],
-        })
-
-    # Sort: database (A) -> backend (B) -> frontend (C)
-    steps.sort(key=lambda s: s["id"])
-
-    return {
-        "feature_name":     dependency_graph["feature_name"],
-        "feature_root":     feature_root,
-        "output_root":      output_root,
-        "run_id":           run_id,
-        "target":           target,           # propagated to IntegrationAgent._target_id
-        "project_structure": target_struct,   # resolved struct for IntegrationAgent placement
-        "conversion_steps": steps,
-    }
 
 
 def _infer_mapping_id(pattern: str, node_type: str) -> str:
-    hints = {
-        "Angular 2 Component": "MAP-001",
-        "Angular 2 Service":   "MAP-002",
-        "NgModule":            "MAP-006",
-        "Area API Controller": "MAP-003",
-        "Repository":          "MAP-004",
-        "C# Service":          "MAP-004",
-        "Stored Procedure":    "MAP-004",
-        "C# Class":            "MAP-005",
-    }
-    for keyword, map_id in hints.items():
-        if keyword.lower() in pattern.lower():
-            return map_id
-    return {"frontend": "MAP-001", "backend": "MAP-003", "database": "MAP-004"}.get(node_type, "MAP-001")
+    """Delegate to :func:`agents.plan_builder.infer_mapping_id`."""
+    return _pb_infer_mapping_id(pattern, node_type)
 
 
-def _derive_target_path(
-    node: dict,
-    mapping: dict,
-    target_struct: dict,
-) -> str:
-    """
-    Derive the target file path from the source node and a pre-resolved
-    project-structure dict.
-
-    Parameters
-    ----------
-    target_struct : dict
-        Already-resolved project structure dict (keyed by section, e.g.
-        ``{"frontend": {...}, "backend": {...}}``).  Produced by
-        :func:`_resolve_project_structure` so YAML overrides are already
-        merged in; no further config lookup is needed here.
-    """
-    node_type = node.get("type", "frontend")
-    exports   = node.get("exports", [])
-    name      = exports[0] if exports else Path(node["id"]).stem
-
-    def to_snake(s: str) -> str:
-        s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", s)
-        return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
-
-    feature_name  = node.get("id", "").split("/")[0].lower()
-
-    if node_type == "frontend":
-        comp_root = target_struct.get("frontend", {}).get(
-            "components_root", "frontend/src/components/{feature_name}/"
-        )
-        base = comp_root.replace("{feature_name}", feature_name)
-        return f"{base}{name}.tsx"
-
-    if node_type == "backend":
-        api_root = target_struct.get("backend", {}).get(
-            "api_root", "api/src/api/{feature_name}/"
-        )
-        base = api_root.replace("{feature_name}", to_snake(feature_name))
-        return f"{base}{to_snake(name)}_routes.py"
-
-    if node_type == "database":
-        svc_root = target_struct.get("backend", {}).get(
-            "services_root", "api/src/services/{feature_name}/"
-        )
-        base = svc_root.replace("{feature_name}", to_snake(feature_name))
-        return f"{base}{to_snake(name)}_service.py"
-
-    return f"output/{to_snake(name)}.py"
+def _derive_target_path(node: dict, mapping: dict, target_struct: dict) -> str:
+    """Delegate to :func:`agents.plan_builder.derive_target_path`."""
+    return _pb_derive_target_path(node, mapping, target_struct)
 
 
 # ---------------------------------------------------------------------------
@@ -1214,7 +1033,8 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
                 len(_memory_context.similar_patterns),
                 len(_memory_context.user_preferences),
             )
-    except Exception as _mem_exc:  # noqa: BLE001
+    except (ImportError, OSError, Exception) as _mem_exc:  # noqa: BLE001
+        # Non-fatal: memory is optional — pipeline proceeds without it.
         logger.debug("Memory store unavailable (non-fatal): %s", _mem_exc)
 
     # ---- Step 3: Plan Document Generation ----
@@ -1391,7 +1211,7 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
                 feature_root=Path(args.feature_root) if getattr(args, "feature_root", None) else None,
             )
             logger.info("Knowledge extracted: %s", _ke_result)
-        except Exception as _ke_exc:  # noqa: BLE001
+        except Exception as _ke_exc:  # noqa: BLE001  — non-fatal: pipeline already completed
             logger.debug("Knowledge extraction failed (non-fatal): %s", _ke_exc)
 
     print_banner("Pipeline Complete")
@@ -1489,7 +1309,7 @@ def run_orchestrated_pipeline(args: argparse.Namespace) -> int:
     try:
         from agents.memory_store import MemoryStore  # noqa: PLC0415
         memory_store = MemoryStore()
-    except Exception as exc:  # noqa: BLE001
+    except (ImportError, OSError) as exc:
         logger.debug("MemoryStore unavailable (non-fatal): %s", exc)
 
     orch_cfg = getattr(args, "orchestration_config", {}) or {}
@@ -1509,7 +1329,7 @@ def run_orchestrated_pipeline(args: argparse.Namespace) -> int:
             config=orch_cfg,
         )
         return orchestrator.execute()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001  — intentionally broad: always fall back to sequential
         logger.error(
             "OrchestratorAgent failed (%s). Falling back to sequential pipeline.", exc
         )

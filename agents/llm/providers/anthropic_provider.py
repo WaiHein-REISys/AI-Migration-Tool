@@ -102,7 +102,7 @@ class AnthropicProvider(BaseLLMProvider):
             )
         except anthropic.APIError as exc:
             raise LLMProviderError(
-                f"Anthropic API error [{exc.status_code}]: {exc.message}"
+                f"Anthropic API error [{exc.status_code}]: {exc}"
             ) from exc
         except anthropic.APIConnectionError as exc:
             raise LLMProviderError(f"Anthropic connection error: {exc}") from exc
@@ -187,7 +187,7 @@ class AnthropicProvider(BaseLLMProvider):
             )
         except anthropic.APIError as exc:
             raise LLMProviderError(
-                f"Anthropic tool-use API error [{exc.status_code}]: {exc.message}"
+                f"Anthropic tool-use API error [{exc.status_code}]: {exc}"
             ) from exc
         except anthropic.APIConnectionError as exc:
             raise LLMProviderError(

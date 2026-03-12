@@ -36,11 +36,21 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agents.plan_builder import (
+    build_approved_plan as _pb_build_approved_plan,
+    default_paths as _pb_default_paths,
+    stable_run_id as _pb_stable_run_id,
+)
+
 if TYPE_CHECKING:
     from agents.llm.registry import LLMRouter
     from agents.memory_store import MemoryStore
 
 logger = logging.getLogger(__name__)
+
+# Canonical output paths rooted at the repo root (one directory above agents/).
+_ROOT  = Path(__file__).resolve().parent.parent
+_PATHS = _pb_default_paths(_ROOT)
 
 
 class OrchestratorAgent:
@@ -154,8 +164,6 @@ class OrchestratorAgent:
 
     def _run_scoping(self, config: dict) -> tuple[dict | None, str | None]:
         """Run Step 2 (ScopingAgent) and return (dependency_graph, run_id)."""
-        import hashlib
-        import re
         from agents.scoping_agent import ScopingAgent
 
         args = self._args
@@ -170,17 +178,10 @@ class OrchestratorAgent:
             logger.error("Scoping failed: %s", exc)
             return None, None
 
-        # Derive run_id (matches main.py logic)
-        slug   = re.sub(r"[^\w]", "-", feature_name.lower())[:20].strip("-")
-        abbrev = {"simpler_grants": "sg", "hrsa_pprs": "hp"}.get(target, target[:4])
-        digest = hashlib.sha1(
-            f"{feature_root}|{target}".encode("utf-8")
-        ).hexdigest()[:8]
-        run_id = f"conv-{slug}-{abbrev}-{digest}"
+        run_id = _pb_stable_run_id(feature_name, feature_root or "", target)
 
         # Save dependency graph
-        from pathlib import Path as _Path
-        logs_dir = _Path("logs")
+        logs_dir = _PATHS["logs"]
         logs_dir.mkdir(exist_ok=True)
         graph_path = logs_dir / f"{run_id}-dependency-graph.json"
         scoping_agent.save(graph_path)
@@ -289,19 +290,23 @@ class OrchestratorAgent:
 
     # ------------------------------------------------------------------
     # Action implementations
+    #
+    # NOTE: Each action deliberately catches ``Exception`` (noqa: BLE001)
+    # so the orchestrator loop stays in control.  A failing action returns
+    # ``{"status": "error", ...}`` and the LLM decides whether to retry,
+    # skip, or escalate — it must never be killed by an unexpected exception.
     # ------------------------------------------------------------------
 
     def _action_generate_plan(self, state: dict, **kwargs) -> dict:
         """Generate the migration plan document."""
         from agents.plan_agent import PlanAgent
-        from pathlib import Path as _Path
 
         try:
             plan_agent = PlanAgent(
                 dependency_graph=state["dependency_graph"],
                 config=state["config"],
                 run_id=state["run_id"],
-                plans_dir=_Path("plans"),
+                plans_dir=_PATHS["plans"],
                 llm_router=self._llm_router,
                 target=state["target"],
                 memory_context=state.get("memory_context"),
@@ -318,7 +323,6 @@ class OrchestratorAgent:
     def _action_revise_plan(self, state: dict, feedback: str = "", **kwargs) -> dict:
         """Revise the plan with feedback."""
         from agents.plan_agent import PlanAgent
-        from pathlib import Path as _Path
 
         state["plan_revision_count"] = state.get("plan_revision_count", 0) + 1
 
@@ -334,7 +338,7 @@ class OrchestratorAgent:
                 dependency_graph=state["dependency_graph"],
                 config=state["config"],
                 run_id=state["run_id"],
-                plans_dir=_Path("plans"),
+                plans_dir=_PATHS["plans"],
                 llm_router=self._llm_router,
                 target=state["target"],
                 revision_notes=feedback or kwargs.get("notes", ""),
@@ -388,14 +392,13 @@ class OrchestratorAgent:
         """Execute conversion for all approved plan steps."""
         from agents.conversion_agent import ConversionAgent, AmbiguityException
         from agents.conversion_log import ConversionLog
-        from pathlib import Path as _Path
 
         if not state.get("approved_plan"):
             return {"status": "error", "error": "No approved plan — run approve_plan first."}
 
         approved_plan = state["approved_plan"]
         run_id        = state["run_id"]
-        log_path      = _Path("logs") / f"{run_id}-conversion-log.json"
+        log_path      = _PATHS["logs"] / f"{run_id}-conversion-log.json"
 
         conv_log = ConversionLog(
             feature_name=state["feature_name"],
@@ -420,7 +423,7 @@ class OrchestratorAgent:
             state["conversion_summary"] = summary
 
             # Export markdown log
-            md_log_path = _Path("logs") / f"{run_id}-conversion-log.md"
+            md_log_path = _PATHS["logs"] / f"{run_id}-conversion-log.md"
             conv_log.export_markdown(md_log_path)
 
             logger.info(
@@ -451,7 +454,7 @@ class OrchestratorAgent:
                 approved_plan=approved_plan,
                 output_root=approved_plan["output_root"],
                 run_id=state["run_id"],
-                logs_dir=Path("logs"),
+                logs_dir=_PATHS["logs"],
                 llm_router=self._llm_router,
                 dry_run=state.get("dry_run", False),
             )
@@ -482,7 +485,7 @@ class OrchestratorAgent:
                 approved_plan=approved_plan,
                 output_root=approved_plan["output_root"],
                 run_id=state["run_id"],
-                logs_dir=Path("logs"),
+                logs_dir=_PATHS["logs"],
                 llm_router=self._llm_router,
                 ui_consistency_config=getattr(self._args, "ui_consistency_config", {}),
                 dry_run=state.get("dry_run", False),
@@ -519,7 +522,7 @@ class OrchestratorAgent:
                 output_root=approved_plan["output_root"],
                 target_root=target_root,
                 run_id=state["run_id"],
-                logs_dir=Path("logs"),
+                logs_dir=_PATHS["logs"],
                 config=state["config"],
                 llm_router=None,
                 integration_config=getattr(self._args, "integration_config", {}),
@@ -551,7 +554,7 @@ class OrchestratorAgent:
         try:
             verification_agent = E2EVerificationAgent(
                 run_id=state["run_id"],
-                logs_dir=Path("logs"),
+                logs_dir=_PATHS["logs"],
                 output_root=state["approved_plan"]["output_root"],
                 target_root=target_root,
                 verification_config=getattr(self._args, "verification_config", {}),
@@ -578,8 +581,8 @@ class OrchestratorAgent:
             )
             run_id   = state["run_id"]
             dep_graph = state["dependency_graph"]
-            conv_log_path = Path("logs") / f"{run_id}-conversion-log.json"
-            val_path      = Path("logs") / f"{run_id}-validation-report.json"
+            conv_log_path = _PATHS["logs"] / f"{run_id}-conversion-log.json"
+            val_path      = _PATHS["logs"] / f"{run_id}-validation-report.json"
 
             result = extractor.extract(
                 run_id=run_id,
@@ -725,181 +728,24 @@ class OrchestratorAgent:
         return f"{base}\n\n{mode_note}"
 
     # ------------------------------------------------------------------
-    # Approved plan builder (mirrors main.py._build_approved_plan)
+    # Approved plan builder (delegates to agents.plan_builder)
     # ------------------------------------------------------------------
 
     def _build_approved_plan(self, state: dict) -> dict:
         """Build approved_plan dict from state (used post-approval)."""
-        import re
-        from pathlib import Path as _Path
-
-        config           = state["config"]
-        dependency_graph = state["dependency_graph"]
-        run_id           = state["run_id"]
-        target           = state["target"]
-        feature_root     = state.get("feature_root") or ""
-        output_root      = state.get("output_root") or str(
-            _Path("output") / state["feature_name"]
+        feature_root = state.get("feature_root") or ""
+        output_root  = state.get("output_root") or str(
+            _PATHS["output"] / state["feature_name"]
         )
-
-        steps = []
-        phase_labels = {"frontend": "C", "backend": "B", "database": "A"}
-        phase_counts = {"A": 0, "B": 0, "C": 0}
-        skillset     = config["skillset"]
-
-        # Select base project_structure key from config — mirrors main.py logic.
-        _target_struct_key = f"project_structure_{target}"
-        if _target_struct_key in skillset:
-            structure_key = _target_struct_key
-        elif target == "hrsa_pprs" or "hrsa_pprs" in target:
-            structure_key = "project_structure_hrsa_pprs"
-        else:
-            structure_key = "project_structure"
-
-        # Merge YAML override on top of config defaults (YAML-first).
-        project_structure_override = state.get("project_structure_override")
-        target_struct = self._resolve_project_structure(
-            skillset, structure_key, project_structure_override
+        return _pb_build_approved_plan(
+            dependency_graph=state["dependency_graph"],
+            config=state["config"],
+            run_id=state["run_id"],
+            feature_root=feature_root,
+            output_root=output_root,
+            target=state["target"],
+            project_structure_override=state.get("project_structure_override"),
         )
-
-        mappings_index = config.get("mappings_index", {})
-
-        for node in dependency_graph.get("nodes", []):
-            node_type = node.get("type", "frontend")
-            phase     = phase_labels.get(node_type, "C")
-            phase_counts[phase] += 1
-            step_id = f"Step {phase}{phase_counts[phase]}"
-
-            pattern    = node.get("pattern", "")
-            mapping_id = self._infer_mapping_id(pattern, node_type)
-            mapping    = mappings_index.get(mapping_id, {})
-
-            source_rel = node["id"]
-            target_rel = self._derive_target_path(node, mapping, target_struct)
-
-            rule_ids = ["RULE-003"]
-            if node.get("endpoints"):
-                rule_ids.insert(0, "RULE-001")
-            if node_type == "frontend":
-                rule_ids.append("RULE-002")
-            if node_type == "database":
-                rule_ids.append("RULE-009")
-
-            steps.append({
-                "id":          step_id,
-                "description": f"Convert {source_rel} -> {target_rel}",
-                "source_file": source_rel,
-                "target_file": target_rel,
-                "mapping_id":  mapping_id,
-                "rule_ids":    rule_ids,
-                "rationale":   mapping.get("notes", "Direct translation per RULE-003."),
-            })
-
-        steps.sort(key=lambda s: s["id"])
-
-        return {
-            "feature_name":     dependency_graph["feature_name"],
-            "feature_root":     feature_root,
-            "output_root":      output_root,
-            "run_id":           run_id,
-            "target":           target,           # propagated to IntegrationAgent._target_id
-            "project_structure": target_struct,   # resolved struct for IntegrationAgent placement
-            "conversion_steps": steps,
-        }
-
-    @staticmethod
-    def _infer_mapping_id(pattern: str, node_type: str) -> str:
-        hints = {
-            "Angular 2 Component": "MAP-001",
-            "Angular 2 Service":   "MAP-002",
-            "NgModule":            "MAP-006",
-            "Area API Controller": "MAP-003",
-            "Repository":          "MAP-004",
-            "C# Service":          "MAP-004",
-            "Stored Procedure":    "MAP-004",
-            "C# Class":            "MAP-005",
-        }
-        for keyword, map_id in hints.items():
-            if keyword.lower() in pattern.lower():
-                return map_id
-        return {
-            "frontend": "MAP-001",
-            "backend":  "MAP-003",
-            "database": "MAP-004",
-        }.get(node_type, "MAP-001")
-
-    @staticmethod
-    def _resolve_project_structure(
-        skillset: dict,
-        structure_key: str,
-        override: "dict | None" = None,
-    ) -> dict:
-        """
-        Return resolved project-structure dict (mirrors main._resolve_project_structure).
-
-        Resolution order: YAML override keys > config defaults > hardcoded fallbacks.
-        Merging is per-section, per-key so only explicitly set YAML keys win.
-        """
-        base = skillset.get(structure_key, skillset.get("project_structure", {}))
-        if not override:
-            return base
-        merged: dict = {}
-        all_sections = set(base.keys()) | set(override.keys())
-        for section in all_sections:
-            base_sec     = base.get(section, {})
-            override_sec = override.get(section, {})
-            if isinstance(base_sec, dict) or isinstance(override_sec, dict):
-                merged[section] = {**base_sec, **override_sec}
-            else:
-                merged[section] = override_sec if section in override else base_sec
-        return merged
-
-    @staticmethod
-    def _derive_target_path(
-        node: dict, mapping: dict, target_struct: dict
-    ) -> str:
-        """
-        Derive the target file path from a pre-resolved project-structure dict.
-
-        ``target_struct`` must already be the resolved per-section dict
-        (``{"frontend": {...}, "backend": {...}}``), produced by
-        :meth:`_resolve_project_structure` so YAML overrides are merged in.
-        """
-        import re
-        from pathlib import Path as _Path
-
-        node_type = node.get("type", "frontend")
-        exports   = node.get("exports", [])
-        name      = exports[0] if exports else _Path(node["id"]).stem
-
-        def to_snake(s: str) -> str:
-            s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", s)
-            return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
-
-        feature_name  = node.get("id", "").split("/")[0].lower()
-
-        if node_type == "frontend":
-            comp_root = target_struct.get("frontend", {}).get(
-                "components_root", "frontend/src/components/{feature_name}/"
-            )
-            base = comp_root.replace("{feature_name}", feature_name)
-            return f"{base}{name}.tsx"
-
-        if node_type == "backend":
-            api_root = target_struct.get("backend", {}).get(
-                "api_root", "api/src/api/{feature_name}/"
-            )
-            base = api_root.replace("{feature_name}", to_snake(feature_name))
-            return f"{base}{to_snake(name)}_routes.py"
-
-        if node_type == "database":
-            svc_root = target_struct.get("backend", {}).get(
-                "services_root", "api/src/services/{feature_name}/"
-            )
-            base = svc_root.replace("{feature_name}", to_snake(feature_name))
-            return f"{base}{to_snake(name)}_service.py"
-
-        return f"output/{node['id']}"
 
     # ------------------------------------------------------------------
     # Knowledge extraction (post-pipeline)
@@ -915,8 +761,8 @@ class OrchestratorAgent:
                 memory_store=self._memory_store,
                 llm_router=self._llm_router,
             )
-            conv_log_path = Path("logs") / f"{run_id}-conversion-log.json"
-            val_path      = Path("logs") / f"{run_id}-validation-report.json"
+            conv_log_path = _PATHS["logs"] / f"{run_id}-conversion-log.json"
+            val_path      = _PATHS["logs"] / f"{run_id}-validation-report.json"
             result = extractor.extract(
                 run_id=run_id,
                 dependency_graph=dependency_graph,

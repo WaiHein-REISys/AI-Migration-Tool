@@ -107,7 +107,7 @@ class ConfigIngestionAgent:
             jsonschema.validate(instance=config, schema=schema)
         except ValidationError as exc:
             raise ConfigValidationError(
-                f"Config validation failed at '{exc.json_path}': {exc.message}"
+                f"Config validation failed at '{exc.json_path}': {exc}"
             ) from exc
 
     # ------------------------------------------------------------------

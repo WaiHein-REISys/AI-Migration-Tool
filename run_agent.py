@@ -1302,8 +1302,8 @@ def main() -> int:
     try:
         from agents.cleanup import prune_old_artefacts
         prune_old_artefacts(ROOT)
-    except Exception:
-        pass  # never let cleanup block a run
+    except (ImportError, OSError):
+        pass  # non-fatal: never let cleanup block a run
 
     # CLI overrides (only forward flags that were explicitly set)
     overrides: dict = {}
