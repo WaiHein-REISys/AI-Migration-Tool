@@ -101,7 +101,7 @@ set LLM_BASE_URL=http://localhost:1234/v1
 set LLM_MODEL=local-model
 
 # Local GGUF via llama.cpp
-set LLAMACPP_MODEL_PATH=C:\models\mistral-7b.Q4_K_M.gguf
+set LLAMACPP_MODEL_PATH=<PATH_TO_YOUR_MODEL>\mistral-7b.Q4_K_M.gguf
 
 # Google Gemini API
 set GOOGLE_API_KEY=AIza...

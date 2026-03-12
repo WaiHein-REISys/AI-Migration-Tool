@@ -36,7 +36,7 @@ session focused on that area. Claude Code will inline the file automatically.
 
 **Always make code changes directly in the repository root:**
 ```
-Y:\Solution\HRSA\ai-migration-tool\
+<YOUR_REPO_ROOT>
 ```
 
 Never create, modify, or test files inside `.claude/`. That folder is

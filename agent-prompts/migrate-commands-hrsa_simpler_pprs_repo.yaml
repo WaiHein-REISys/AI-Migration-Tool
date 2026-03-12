@@ -19,7 +19,7 @@ job:
 pipeline:
   # REQUIRED -- absolute path to the legacy feature folder.
   # Reactivites Commands feature (CQRS command handlers for Activities).
-  feature_root: "/Users/leohein/Documents/Github/Reactivites/"
+  feature_root: "<YOUR_SOURCE_ROOT>/"
 
   # REQUIRED -- human-readable name (used in filenames and logs)
   feature_name: "Commands"
@@ -48,7 +48,7 @@ pipeline:
   # Set explicitly here to override, or leave null to rely on auto-population.
   # IMPORTANT: target_root must be the PARENT of the top-level path prefix used
   # in project_structure_hrsa_pprs (which starts with "frontend/...").
-  target_root: "/Users/leohein/Documents/Github/hrsa-simpler-pprs"
+  target_root: "<YOUR_TARGET_ROOT>"
 
 # ── Integration (Stage 7) ──────────────────────────────────────────────────
 # Runs after validation. Places output files into target_root, syncs
@@ -154,9 +154,9 @@ orchestration:
 
 notes: |
   Source:  React / ASP.NET Core
-           Root: /Users/leohein/Documents/Github/Reactivites/
+           Root: <YOUR_SOURCE_ROOT>/
   Target:  Next.js / Flask
-           Root: /Users/leohein/Documents/Github/hrsa-simpler-pprs/
+           Root: <YOUR_TARGET_ROOT>/
 
   Add any context the agent or human reviewer should know:
   - Business domain of this feature

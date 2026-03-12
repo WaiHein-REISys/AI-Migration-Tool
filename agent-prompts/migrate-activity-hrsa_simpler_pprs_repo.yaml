@@ -72,7 +72,7 @@ integration:
   update_tsconfig_paths: true     # true = add path aliases to tsconfig.json (opt-in)
   post_placement_command: null     # e.g. "npm run build" — runs after all files placed
   post_placement_timeout: 300      # seconds before post_placement_command times out
-  generate_playwright_stubs: true # true = emit tests/e2e/<Component>.spec.ts stubs
+  generate_playwright_stubs: false # true = emit tests/e2e/<Component>.spec.ts stubs
 
 # ── UI Consistency Audit (Stage 6b) ───────────────────────────────────────
 ui_consistency:
@@ -85,31 +85,12 @@ ui_consistency:
 # Makefile) and verification.enabled is flipped to true automatically when found.
 # Override by setting commands and enabled explicitly below.
 verification:
-  enabled: true           # auto-set to true when commands are auto-detected
+  enabled: false           # auto-set to true when commands are auto-detected
   tool: commands           # commands (default) | playwright
   cwd: null                # null => target_root (auto-resolved); set explicitly to override
   commands: []             # leave empty for auto-detection, or specify explicitly
   env: {}
   fail_on_error: true
-
-# ── Project structure (output file path templates) ────────────────────────
-# Optional. When set, values here take precedence over the corresponding
-# entries in config/skillset-config.json for the selected target.
-# Omit any key to fall back to the config default for that key.
-# Use {feature_name} as a placeholder for the lower-cased feature name.
-#
-# Uncomment and edit the sections you want to override:
-#
-# project_structure:
-#   frontend:
-#     components_root: "frontend/app/components/{feature_name}/"
-#     services_root:   "frontend/app/services/"
-#   backend:
-#     api_root:              "backend/routes/"
-#     services_root:         "backend/services/"
-#     repositories_root:     "backend/repositories/"
-#   database:
-#     init_script: "database/init_db.py"
 
 llm:
   # null = auto-detect from environment variables
@@ -119,7 +100,7 @@ llm:
   model: null
 
   # true = template-only mode, no API key required
-  no_llm: false
+  no_llm: true
 
   # Optional -- only set if needed
   base_url: null
