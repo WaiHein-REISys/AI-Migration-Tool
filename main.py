@@ -737,7 +737,11 @@ def _build_approved_plan(
             # ── Knowledge-extraction metadata ──────────────────────────────
             # Propagated from the dependency graph node so KnowledgeExtractor
             # can build rich pattern-library entries (Jaccard on imports).
-            "source_imports":  node.get("imports", []),
+            # "imports" is set by the TypeScript/Angular scoping path.
+            # "usings"  is set by the C# scoping path (_analyze_csharp_file).
+            # Fall back to "usings" so EF Core / ASP.NET source files get
+            # their namespaces captured in the pattern library.
+            "source_imports":  node.get("imports") or node.get("usings", []),
             "source_hooks":    node.get("hooks", []),
             "file_type":       node.get("pattern", ""),   # e.g. "React Component"
             "component_type":  node_type,                  # "frontend"|"backend"|"database"
@@ -1384,6 +1388,7 @@ def _run_pipeline_with_router(args: argparse.Namespace, llm_router) -> int:
                 conversion_log_path=DEFAULT_LOGS_DIR / f"{run_id}-conversion-log.json",
                 validation_report_path=DEFAULT_LOGS_DIR / f"{run_id}-validation-report.json"
                 if (DEFAULT_LOGS_DIR / f"{run_id}-validation-report.json").exists() else None,
+                feature_root=Path(args.feature_root) if getattr(args, "feature_root", None) else None,
             )
             logger.info("Knowledge extracted: %s", _ke_result)
         except Exception as _ke_exc:  # noqa: BLE001

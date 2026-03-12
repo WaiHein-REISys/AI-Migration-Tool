@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,7 +48,7 @@ class KnowledgeExtractor:
         llm_router: "LLMRouter | None" = None,
     ) -> None:
         self._store  = memory_store
-        self._router = llm_router  # reserved for future LLM-assisted extraction
+        self._router = llm_router  # used for LLM-assisted import extraction fallback
 
     # ------------------------------------------------------------------
     # Public API
@@ -59,6 +60,7 @@ class KnowledgeExtractor:
         dependency_graph: dict,
         conversion_log_path: Path,
         validation_report_path: Path | None = None,
+        feature_root: Path | None = None,
     ) -> dict:
         """
         Mine completed run artefacts and persist learnings.
@@ -85,7 +87,9 @@ class KnowledgeExtractor:
             return result
 
         # 1. Extract code conversion patterns
-        result["patterns_added"] = self._extract_patterns(conversion_log)
+        result["patterns_added"] = self._extract_patterns(
+            conversion_log, feature_root=feature_root
+        )
 
         # 2. Extract domain knowledge from dependency graph
         result["domain_facts_added"] = self._extract_domain_facts(dependency_graph)
@@ -108,13 +112,23 @@ class KnowledgeExtractor:
     # Internal — pattern extraction
     # ------------------------------------------------------------------
 
-    def _extract_patterns(self, conversion_log: dict) -> int:
+    def _extract_patterns(
+        self,
+        conversion_log: dict,
+        feature_root: Path | None = None,
+    ) -> int:
         """
         Mine 'wrote_file' / 'completed' log entries to find source→target
         conversion patterns (import set + hook set → target signature).
 
         Supports both ConversionLog format (key="entries", action field) and
         synthetic log format (key="steps", status field) for backwards compat.
+
+        When an entry has ``file_type`` but empty ``source_imports`` and
+        ``source_hooks`` (e.g. C# files whose usings were not forwarded, or any
+        language the static parser doesn't cover), the method attempts LLM-based
+        import extraction from the on-disk source file — provided ``self._router``
+        is available and ``feature_root`` is given.
 
         Writes to MemoryStore.pattern-library.json via record_patterns().
         """
@@ -131,6 +145,12 @@ class KnowledgeExtractor:
             status = step.get("status") or step.get("action", "")
             if status not in ("wrote_file", "completed", "success"):
                 continue
+
+            # LLM-assisted import enrichment: if the entry has a file_type but
+            # no imports/hooks (e.g. C# EF Core files, SQL files, or any type
+            # whose static parser doesn't populate "imports"), try to fill them
+            # from the actual source file via the LLM.
+            step = self._maybe_enrich_with_llm(step, feature_root)
 
             src_sig = step.get("source_signature", "")
             tgt_sig = step.get("target_signature", "")
@@ -166,6 +186,130 @@ class KnowledgeExtractor:
 
         synthetic_log = {"steps": enriched}
         return self._store.record_patterns(synthetic_log)
+
+    def _maybe_enrich_with_llm(
+        self,
+        step: dict,
+        feature_root: Path | None,
+    ) -> dict:
+        """
+        Return a (possibly enriched) copy of *step*.
+
+        Conditions for LLM enrichment:
+        - The entry has a ``file_type`` (post-fix entries always do)
+        - ``source_imports`` is empty or missing
+        - An LLM router is available (``self._router`` is not None)
+        - The source file exists on disk relative to ``feature_root``
+
+        The LLM is asked to extract the top external imports / framework
+        identifiers and any lifecycle-hook method names from the file content.
+        Response is parsed as JSON; on any error the original step is returned
+        unchanged (soft-fail).
+        """
+        # Only enrich when we have a file_type but no imports to drive matching
+        if not step.get("file_type"):
+            return step
+        if step.get("source_imports") or step.get("source_hooks"):
+            return step
+        if self._router is None or feature_root is None:
+            return step
+
+        source_file = step.get("source_file", "")
+        if not source_file:
+            return step
+
+        src_path = feature_root / source_file
+        if not src_path.exists():
+            # Try the source_file as an absolute path
+            abs_path = Path(source_file)
+            if not abs_path.exists():
+                return step
+            src_path = abs_path
+
+        try:
+            source_code = src_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return step
+
+        extracted = self._llm_extract_imports(
+            source_code=source_code,
+            file_type=step.get("file_type", ""),
+            lang=step.get("source_lang", ""),
+            source_file=source_file,
+        )
+        if not extracted:
+            return step
+
+        enriched = dict(step)
+        if extracted.get("imports"):
+            enriched["source_imports"] = extracted["imports"]
+            logger.debug(
+                "KnowledgeExtractor: LLM extracted %d imports from '%s'",
+                len(extracted["imports"]),
+                source_file,
+            )
+        if extracted.get("hooks"):
+            enriched["source_hooks"] = extracted["hooks"]
+        return enriched
+
+    def _llm_extract_imports(
+        self,
+        source_code: str,
+        file_type: str,
+        lang: str,
+        source_file: str,
+    ) -> dict:
+        """
+        Call the LLM to extract external imports and lifecycle hooks from
+        *source_code*.  Returns ``{"imports": [...], "hooks": [...]}`` or ``{}``
+        on failure.
+
+        The prompt is language-agnostic so it works for C#, TypeScript, Python,
+        SQL, and any other language the static parser doesn't cover well.
+        Truncates the source to 6 000 chars to stay within token limits.
+        """
+        from agents.llm.base import LLMMessage
+
+        snippet = source_code[:6_000]
+        system_prompt = (
+            "You are a code analysis assistant. "
+            "Your ONLY job is to extract dependency and framework information "
+            "from source code for a migration knowledge base. "
+            "You must respond with a single JSON object and nothing else."
+        )
+        user_prompt = (
+            f"Analyze this {lang or 'source'} file (type: {file_type}, path: {source_file}).\n\n"
+            "Extract:\n"
+            "1. `imports`: External library/framework/namespace identifiers used "
+            "(e.g. 'Microsoft.EntityFrameworkCore', 'MediatR', '@angular/core', "
+            "'react', 'flask'). Omit relative imports (starting with '.' or '/').\n"
+            "2. `hooks`: Lifecycle method names (e.g. 'ngOnInit', 'useEffect', "
+            "'OnGet', 'Handle', 'Execute'). Empty list if none.\n\n"
+            "Respond with ONLY this JSON (no markdown, no explanation):\n"
+            '{"imports": ["...", ...], "hooks": ["...", ...]}\n\n'
+            f"Source code:\n```\n{snippet}\n```"
+        )
+
+        try:
+            response = self._router.complete(
+                system=system_prompt,
+                messages=[LLMMessage(role="user", content=user_prompt)],
+            )
+            # Strip markdown fences if the model wrapped the JSON anyway
+            raw = response.text.strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            data = json.loads(raw)
+            return {
+                "imports": [str(i) for i in data.get("imports", []) if i],
+                "hooks":   [str(h) for h in data.get("hooks", []) if h],
+            }
+        except Exception as exc:  # noqa: BLE001 — intentional soft-fail
+            logger.debug(
+                "KnowledgeExtractor: LLM import extraction failed for '%s': %s",
+                source_file, exc,
+            )
+            return {}
 
     @staticmethod
     def _derive_source_signature(step: dict) -> str:
