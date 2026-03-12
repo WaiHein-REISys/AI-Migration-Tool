@@ -52,9 +52,12 @@ requiring the agent to know the full pipeline internals.
 """
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Ensure project root is on sys.path
